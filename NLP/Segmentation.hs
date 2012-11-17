@@ -7,7 +7,10 @@ module NLP.Segmentation
     , WordMass(..)
     , SentenceMass(..)
     , ParagraphMass(..)
+    , paragraphWordMass
     ) where
+
+import Data.List
 
 import NLP.Tokenizer
 
@@ -36,7 +39,7 @@ instance LinearSegmentation [WordMass] where
     toCharacterMass = error "WordMass toCharacterMass not implemented"
     toWordMass _ = id
     toSentenceMass = error "WordMass toSentenceMass not implemented"
-    toParagraphMass = error "WordMass toParagraphMass not implemented"
+    toParagraphMass toks wms = upcastMass wms (paragraphWordMass toks)
 
 instance LinearSegmentation [SentenceMass] where
     toCharacterMass = error "SentenceMass toCharacterMass not implemented"
@@ -52,6 +55,23 @@ instance LinearSegmentation [ParagraphMass] where
               go _ [] = []
     toSentenceMass = error "ParagraphMass toSentenceMass not implemented"
     toParagraphMass _ = id
+
+paragraphWordMass :: [Token] -> [WordMass]
+paragraphWordMass toks = map (WordMass . length . filter isWord) (splitAtParagraphs toks)
+
+upcastMass :: (Num a, Ord a, Num b) => [a] -> [a] -> [b]
+upcastMass ls (0:us) = upcastMass ls us
+upcastMass (0:ls) us = upcastMass ls us
+upcastMass [] [] = []
+upcastMass [] us = error "upcastMass: masses differ (upper is greater)"
+upcastMass ls [] = error "upcastMass: masses differ (lower is greater)"
+upcastMass (l:ls) (u:us) =
+    case compare l u of
+         EQ -> 1 : upcastMass ls us
+         LT -> upcastMass ls (u-l:us)
+         GT -> case upcastMass (l-u:ls) us of
+                    (m:ms) -> m+1:ms
+                    [] -> [1]
 
 -- TODO: JSON import/export of segmentations
 
