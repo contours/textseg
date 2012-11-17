@@ -1,0 +1,30 @@
+name:                textseg
+version:             0.1.0.0
+synopsis:            An experiment comparing the performance of text segmentation algorithms.
+-- description:         
+homepage:            https://github.com/gmaslov/textseg
+-- license:             
+license-file:        LICENSE
+author:              Greg Maslov
+maintainer:          maslov@cs.unc.edu
+-- copyright:           
+-- category:            
+build-type:          Simple
+cabal-version:       >=1.8
+
+executable segmentation-showdown
+  main-is:             Main.hs
+  ghc-options:         -W -O -threaded
+  -- other-modules:       
+  build-depends:       base ==4.5.*,
+                       containers ==0.4.*,
+                       bytestring ==0.9.*,
+                       Glob ==0.7.*,
+                       stemmer ==0.2.*,
+                       hmatrix ==0.14.*,
+                       hmatrix-gsl-stats ==0.1.*,
+                       MonadRandom ==0.1.*,
+                       attoparsec ==0.10.*,
+                       MissingPy ==0.10.*,
+                       unordered-containers ==0.2.*
+
