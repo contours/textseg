@@ -15,7 +15,7 @@ import Data.Char (isSpace, isPunctuation)
 import Control.Applicative
 import Data.List
 
--- TODO: sentence breaks
+-- TODO: SentenceBreak
 data Token
     = Word !ByteString
     | ParagraphBreak !ByteString

@@ -8,6 +8,7 @@ module NLP.Segmentation
     , SentenceMass(..)
     , ParagraphMass(..)
     , paragraphWordMass
+    , roundMasses
     ) where
 
 import Data.List
@@ -39,7 +40,7 @@ instance LinearSegmentation [WordMass] where
     toCharacterMass = error "WordMass toCharacterMass not implemented"
     toWordMass _ = id
     toSentenceMass = error "WordMass toSentenceMass not implemented"
-    toParagraphMass toks wms = upcastMass wms (paragraphWordMass toks)
+    toParagraphMass toks wms = map fromIntegral $ upcastSegmentation wms (paragraphWordMass toks)
 
 instance LinearSegmentation [SentenceMass] where
     toCharacterMass = error "SentenceMass toCharacterMass not implemented"
@@ -59,19 +60,47 @@ instance LinearSegmentation [ParagraphMass] where
 paragraphWordMass :: [Token] -> [WordMass]
 paragraphWordMass toks = map (WordMass . length . filter isWord) (splitAtParagraphs toks)
 
-upcastMass :: (Num a, Ord a, Num b) => [a] -> [a] -> [b]
-upcastMass ls (0:us) = upcastMass ls us
-upcastMass (0:ls) us = upcastMass ls us
-upcastMass [] [] = []
-upcastMass [] us = error "upcastMass: masses differ (upper is greater)"
-upcastMass ls [] = error "upcastMass: masses differ (lower is greater)"
-upcastMass (l:ls) (u:us) =
-    case compare l u of
-         EQ -> 1 : upcastMass ls us
-         LT -> upcastMass ls (u-l:us)
-         GT -> case upcastMass (l-u:ls) us of
-                    (m:ms) -> m+1:ms
-                    [] -> [1]
+upcastSegmentation :: (Integral a,Show a) => [a] -> [a] -> [a]
+upcastSegmentation ls1 us1 = go 0 (roundMasses ls1 us1) us1
+    where go n (0:ls) us = go n ls us
+          go n ls (0:us) = go n ls us
+          go n (l:ls) (u:us) =
+              case compare (l-u) 0 of
+                   EQ -> n+1 : go 0 ls us
+                   GT -> go (n+1) (l-u:ls) us
+                   LT -> error "upcastSegmentation: there is a bug in roundMasses"
+          go 0 [] [] = []
+          go _ _ _ = error "upcastSegmentation: TODO: figure out what to do in these cases, if they ever occur"
+
+roundMasses :: (Num a, Ord a) => [a] -> [a] -> [a]
+roundMasses ls us = indicesToMasses (roundIndices (massesToIndices ls) (massesToIndices us)) (sum us)
+
+-- | Convert list of 1-based indices of segment beginnings to list of segment masses.
+-- Requires the total mass as a parameter, to calculate the mass of the last segment.
+indicesToMasses :: Num a => [a] -> a -> [a]
+indicesToMasses is total = zipWith (-) (is++[total]) (0:is++[total])
+
+-- | Convert list of segment masses to list of 0-based indices of segment beginnings.
+-- Note that the length of the last segment is unspecified in this representation.
+massesToIndices :: Num a => [a] -> [a]
+massesToIndices = tail . scanl (+) 0 . init
+
+-- | @roundIndices ls us@: round off each index in @ls@ to the closest one in @us@. Both lists must be in ascending order. Indices in @ls@ which are exactly halfway between two indices in @us@ get rounded to the left.
+roundIndices :: (Num a, Ord a) => [a] -> [a] -> [a]
+roundIndices [] _ = []
+roundIndices (l:ls) [u] = u : roundIndices ls [u] -- past the end
+roundIndices (l:ls) (u1:u2:us) =
+    case () of
+         () | l == u1 -> u1 : roundIndices ls (u1:u2:us)
+         () | l == u2 -> u2 : roundIndices ls (u1:u2:us)
+         () | l >  u2 -> roundIndices (l:ls) (u2:us)
+         () | l <  u1 -> u1 : roundIndices ls (u1:u2:us)
+         () | l <  u2 ->
+             case compare (l-u1) (u2-l) of
+                  LT -> u1 : roundIndices ls (u1:u2:us)
+                  EQ -> u1 : roundIndices ls (u1:u2:us)
+                  GT -> u2 : roundIndices ls (u1:u2:us)
+
 
 -- TODO: JSON import/export of segmentations
 
