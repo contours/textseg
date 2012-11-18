@@ -16,15 +16,18 @@ executable segmentation-showdown
   main-is:             Main.hs
   ghc-options:         -W -O -threaded
   -- other-modules:       
-  build-depends:       base ==4.5.*,
-                       containers ==0.4.*,
-                       bytestring ==0.9.*,
-                       Glob ==0.7.*,
-                       stemmer ==0.2.*,
+  build-depends:       base ==4.6.*,
+                       hashable ==1.1.*,
+                       attoparsec ==0.10.*,
+                       bytestring ==0.10.*,
+                       MissingPy ==0.10.*,
+                       unordered-containers ==0.2.*,
+                       vector ==0.10.*,
+                       containers ==0.5.*,
                        hmatrix ==0.14.*,
                        hmatrix-gsl-stats ==0.1.*,
                        MonadRandom ==0.1.*,
-                       attoparsec ==0.10.*,
-                       MissingPy ==0.10.*,
-                       unordered-containers ==0.2.*
+
+                       swift-lda ==0.4.*,
+                       stemmer ==0.2.*
 
