@@ -23,9 +23,6 @@ import NLP.Stemmer
 import NLP.WordFrequencyVector
 import NLP.Segmentation
 
-data GapClass = Peak | Valley | Neither
-    deriving Show
-
 stopWords :: HashSet ByteString
 --stopWords = Set.fromList $ BS.lines $ unsafePerformIO $ BS.readFile "data/jarmasz_szpakowicz_2003.list"
 stopWords = Set.fromList $ BS.lines $ unsafePerformIO $ BS.readFile "data/nltk_english_stopwords"
@@ -37,8 +34,7 @@ textTiling text = let
     words :: [(Int, ByteString)]
     words = [(i,stem w) | (i, Word (BS.map toLower->w)) <- zip [0..] (filter isWord text)
                         , not (Set.member w stopWords)]
-        -- XXX: stemming is disabled
-        where stem = id -- BS.pack . NLP.Stemmer.stem English . BS.unpack
+        where stem = BS.pack . NLP.Stemmer.stem English . BS.unpack
     totalWordMass = length (filter isWord text)
     -- Group words into pseudo-sentences of length w=20
     w = 20
@@ -63,25 +59,34 @@ textTiling text = let
     numGaps = dim gapCohesionScores
     smoothed = subVector radius numGaps (conv meanKernel gapCohesionScores)
         where meanKernel = constant (1.0/fromIntegral(radius+1)) (radius+1)
-    -- As for identifying valleys, the TextTiling paper describes
-    -- this rather boring and ad-hoc algorithm of 
+    -- As for identifying valleys, the TextTiling paper describes this rather ad-hoc algorithm.
     lpeak i = findPeak (-1) (smoothed@>i) i
     rpeak i = findPeak ( 1) (smoothed@>i) i
     findPeak dir x i | i == 0 && dir == -1 = max x (smoothed@>i)
     findPeak dir x i | i == numGaps-1 && dir == 1 = max x (smoothed@>i)
-    findPeak dir x i = if x >= smoothed@>i
+    findPeak dir x i = if smoothed@>i >= x
                           then findPeak dir (smoothed@>i) (i+dir)
                           else x
-    gapDepths = buildVector numGaps $ \i -> lpeak i + rpeak i - 2*(smoothed@>i)
+    isLocalMinimum i | i == 0 = False
+    isLocalMinimum i | i == numGaps-1 = False
+    isLocalMinimum i = case (compare (smoothed@>(i-1)) (smoothed@>i), compare (smoothed@>i) (smoothed@>(i+1))) of
+                            (GT,LT) -> True
+                            (EQ,LT) -> True
+                            (GT,EQ) -> True
+                            _ -> False
+    gapDepths = buildVector numGaps $ \i ->
+        if isLocalMinimum i
+           then lpeak i + rpeak i - 2*(smoothed@>i)
+           else 0
+    valleyDepths = fromList $ filter (>0) (toList gapDepths)
     -- Assign boundaries at any valley deeper than a cutoff threshold.
-    -- Threshold is one standard deviation deeper than the mean gap depth.
-    threshold = (mean gapDepths - stddev gapDepths)
+    -- Threshold is one standard deviation deeper than the mean valley depth.
+    threshold = mean valleyDepths - stddev valleyDepths
     boundaries1 = catMaybes $ zipWith assign gapIndices (toList gapDepths)
-        where assign i score = if score > threshold
-                                  then Just i else Nothing
+        where assign i score = if score > threshold then Just i else Nothing
     -- remove too-close boundaries
     boundaries = concatMap (\[a,b] -> if abs (a-b) < (4*w) then [a] else [a,b]) (window 2 2 boundaries1)
     in map WordMass $
-    -- convert boundary indices to a list of word masses
-    zipWith (-) (boundaries++[totalWordMass]) (0:boundaries++[totalWordMass])
+        -- convert boundary indices to a list of word masses
+        zipWith (-) (boundaries++[totalWordMass]) (0:boundaries++[totalWordMass])
 
