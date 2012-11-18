@@ -24,6 +24,7 @@ newtype SentenceMass = SentenceMass Int
 newtype ParagraphMass = ParagraphMass Int
     deriving (Eq,Show,Ord,Enum,Real,Num,Integral)
 
+-- | This class provides operations for converting between different levels of linear segmentation, given the tokens of the original document. Downcasts (e.g. sentence masses to word masses) are exact. Upcasts (e.g. word masses to sentence masses) will round off segment boundaries to the nearest possible location.
 class LinearSegmentation s where
     toCharacterMass :: [Token] -> s -> [CharacterMass]
     toWordMass :: [Token] -> s -> [WordMass]
@@ -46,7 +47,7 @@ instance LinearSegmentation [SentenceMass] where
     toCharacterMass = error "SentenceMass toCharacterMass not implemented"
     toWordMass = error "SentenceMass toWordMass not implemented"
     toSentenceMass _ = id
-    toParagraphMass = error "SentenceMass toParagraphMass not implemented"
+    toParagraphMass toks sms = map fromIntegral $ upcastSegmentation sms (paragraphSentenceMass toks)
 
 instance LinearSegmentation [ParagraphMass] where
     toCharacterMass = error "ParagraphMass toCharacterMass not implemented"
@@ -57,8 +58,13 @@ instance LinearSegmentation [ParagraphMass] where
     toSentenceMass = error "ParagraphMass toSentenceMass not implemented"
     toParagraphMass _ = id
 
+-- TODO: JSON import/export of segmentations
+
 paragraphWordMass :: [Token] -> [WordMass]
 paragraphWordMass toks = map (WordMass . length . filter isWord) (splitAtParagraphs toks)
+
+paragraphSentenceMass :: [Token] -> [SentenceMass]
+paragraphSentenceMass toks = map (SentenceMass . (+1) . length . filter isSentenceBreak) (splitAtParagraphs toks)
 
 upcastSegmentation :: (Integral a,Show a) => [a] -> [a] -> [a]
 upcastSegmentation ls1 us1 = go 0 (roundMasses ls1 us1) us1
@@ -72,6 +78,7 @@ upcastSegmentation ls1 us1 = go 0 (roundMasses ls1 us1) us1
           go 0 [] [] = []
           go _ _ _ = error "upcastSegmentation: TODO: figure out what to do in these cases, if they ever occur"
 
+-- | @roundMasses ls us@: as 'roundIndices', but operates on segment masses. The segment boundaries of @ls@ are shifted to coincide with the closest segment boundaries of @us@.
 roundMasses :: (Num a, Ord a) => [a] -> [a] -> [a]
 roundMasses ls us = indicesToMasses (roundIndices (massesToIndices ls) (massesToIndices us)) (sum us)
 
@@ -100,7 +107,4 @@ roundIndices (l:ls) (u1:u2:us) =
                   LT -> u1 : roundIndices ls (u1:u2:us)
                   EQ -> u1 : roundIndices ls (u1:u2:us)
                   GT -> u2 : roundIndices ls (u1:u2:us)
-
-
--- TODO: JSON import/export of segmentations
 
