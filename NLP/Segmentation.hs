@@ -7,7 +7,11 @@ module NLP.Segmentation
     , WordMass(..)
     , SentenceMass(..)
     , ParagraphMass(..)
+    , totalSentenceMass
+    , totalParagraphMass
     , paragraphWordMass
+    , paragraphSentenceMass
+    , sentenceWordMass
     , roundMasses
     ) where
 
@@ -60,11 +64,23 @@ instance LinearSegmentation [ParagraphMass] where
 
 -- TODO: JSON import/export of segmentations
 
+totalSentenceMass :: [Token] -> SentenceMass
+totalSentenceMass = sum . paragraphSentenceMass
+
+totalParagraphMass :: [Token] -> ParagraphMass
+totalParagraphMass = ParagraphMass . (+1) . length . filter isParagraphBreak
+
+-- | Word mass of each paragraph.
 paragraphWordMass :: [Token] -> [WordMass]
 paragraphWordMass toks = map (WordMass . length . filter isWord) (splitAtParagraphs toks)
 
+-- | Sentence mass of each paragraph.
 paragraphSentenceMass :: [Token] -> [SentenceMass]
 paragraphSentenceMass toks = map (SentenceMass . (+1) . length . filter isSentenceBreak) (splitAtParagraphs toks)
+
+-- | Word mass of each sentence.
+sentenceWordMass :: [Token] -> [WordMass]
+sentenceWordMass toks = map (WordMass . length . filter isWord) (splitAtSentences toks)
 
 upcastSegmentation :: (Integral a,Show a) => [a] -> [a] -> [a]
 upcastSegmentation ls1 us1 = go 0 (roundMasses ls1 us1) us1
@@ -95,7 +111,7 @@ massesToIndices = tail . scanl (+) 0 . init
 -- | @roundIndices ls us@: round off each index in @ls@ to the closest one in @us@. Both lists must be in ascending order. Indices in @ls@ which are exactly halfway between two indices in @us@ get rounded to the left.
 roundIndices :: (Num a, Ord a) => [a] -> [a] -> [a]
 roundIndices [] _ = []
-roundIndices (l:ls) [u] = u : roundIndices ls [u] -- past the end
+roundIndices (_:ls) [u] = u : roundIndices ls [u] -- past the end
 roundIndices (l:ls) (u1:u2:us) =
     case () of
          () | l == u1 -> u1 : roundIndices ls (u1:u2:us)

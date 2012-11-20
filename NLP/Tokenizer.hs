@@ -14,7 +14,7 @@ module NLP.Tokenizer
 import qualified Data.ByteString.Char8 as BS
 import           Data.ByteString.Char8 (ByteString)
 import Data.Attoparsec.ByteString.Char8 hiding (isSpace,take)
-import Data.Char (isSpace, isPunctuation)
+import Data.Char (isSpace)
 import Control.Applicative
 import Data.List
 import Data.Hashable (Hashable(..))
@@ -64,17 +64,20 @@ createSentenceBreaks = map f
 
 -- | Splits token stream according to 'ParagraphBreak's, discarding them.
 splitAtParagraphs :: [Token] -> [[Token]]
-splitAtParagraphs toks =
-    case findIndex isParagraphBreak toks of
-         Just ix -> take ix toks : splitAtParagraphs (drop (ix+1) toks)
-         Nothing -> [toks]
+splitAtParagraphs = splitAtToken isParagraphBreak
 
 -- | Splits token stream according to 'SentenceBreak's, discarding them.
+-- 'ParagraphBreak's are also taken into account as being implicit 'SentenceBreak's.
 splitAtSentences :: [Token] -> [[Token]]
-splitAtSentences toks =
-    case findIndex isSentenceBreak toks of
-         Just ix -> take ix toks : splitAtSentences (drop (ix+1) toks)
-         Nothing -> [toks]
+splitAtSentences = splitAtToken (\t -> isSentenceBreak t || isParagraphBreak t)
+
+-- | Generic version of @splitAt...@.
+splitAtToken :: (Token -> Bool) -> [Token] -> [[Token]]
+splitAtToken p toks =
+    case findIndex p toks of
+         Just 0  -> splitAtToken p (tail toks)
+         Just ix -> take ix toks : splitAtToken p (drop (ix+1) toks)
+         Nothing -> if null toks then [] else [toks]
 
 isWord :: Token -> Bool
 isWord (Word _) = True
