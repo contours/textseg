@@ -4,6 +4,7 @@
 module NLP.Segmentation.TopicTiling
     ( trainLDA
     , topicTiling
+    , Model
     ) where
 
 import NLP.LDA
@@ -19,24 +20,20 @@ import NLP.Segmentation
 import NLP.Tokenizer
 import NLP.FrequencyVector
 
-import Debug.Trace
-
 data Model = Model WordMap LDA
-
 type WordMap = HashMap Token Int
 
 -- | Train the LDA classifier on a set of documents.
 trainLDA :: [[Token]] -> Model
 trainLDA documents =
     -- TODO: get a random seed
-    let seed = 0
+    let seed = 42
         -- suggested parameters as in Riedl 2012
-        -- TODO: increase back to 500
         num_topics = 100
         -- XXX: 'a' may be scaled by 'k' (?), check the LDA source code
         a = 50
         b = 0.01
-        num_iter = 100
+        num_iter = 500
         lda0 = initial num_topics a b
         wordMap = mkWordMap (concat documents)
         docs0 = V.fromList (toDocs wordMap documents)
@@ -64,9 +61,8 @@ takesV is xs = snd $ mapAccumL (\a b -> swap (V.splitAt (fromIntegral b) a)) xs 
 topicTiling :: Model -> [Token] -> [SentenceMass]
 topicTiling (Model wordMap lda) toks = let
     -- TODO: get a random seed
-    seed = 0
-    -- TODO: increase back to 100
-    num_iter = 10
+    seed = 42
+    num_iter = 100
     -- get per-word topic assignments
     (doc,_) = runLDA seed num_iter lda (V.singleton (toDoc wordMap 0 toks))
     wordTopics = V.map (\(_,Just z) -> z) (snd (V.head doc))

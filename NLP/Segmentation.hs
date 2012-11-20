@@ -2,11 +2,12 @@
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 module NLP.Segmentation
-    ( LinearSegmentation(..)
+    ( LinearMass(..)
     , CharacterMass(..)
     , WordMass(..)
     , SentenceMass(..)
     , ParagraphMass(..)
+    , totalWordMass
     , totalSentenceMass
     , totalParagraphMass
     , paragraphWordMass
@@ -29,31 +30,40 @@ newtype ParagraphMass = ParagraphMass Int
     deriving (Eq,Show,Ord,Enum,Real,Num,Integral)
 
 -- | This class provides operations for converting between different levels of linear segmentation, given the tokens of the original document. Downcasts (e.g. sentence masses to word masses) are exact. Upcasts (e.g. word masses to sentence masses) will round off segment boundaries to the nearest possible location.
-class LinearSegmentation s where
-    toCharacterMass :: [Token] -> s -> [CharacterMass]
-    toWordMass :: [Token] -> s -> [WordMass]
-    toSentenceMass :: [Token] -> s -> [SentenceMass]
-    toParagraphMass :: [Token] -> s -> [ParagraphMass]
+class LinearMass s where
+    toCharacterMass :: [Token] -> [s] -> [CharacterMass]
+    toWordMass :: [Token] -> [s] -> [WordMass]
+    toSentenceMass :: [Token] -> [s] -> [SentenceMass]
+    toParagraphMass :: [Token] -> [s] -> [ParagraphMass]
 
-instance LinearSegmentation [CharacterMass] where
+    -- | General casting between linear segmentation types.
+    fromLinearMass :: LinearMass t => [Token] -> [t] -> [s]
+
+instance LinearMass CharacterMass where
     toCharacterMass _ = id
     toWordMass = error "CharacterMass toWordMass not implemented"
     toSentenceMass = error "CharacterMass toSentenceMass not implemented"
     toParagraphMass = error "CharacterMass toParagraphMass not implemented"
 
-instance LinearSegmentation [WordMass] where
+    fromLinearMass = toCharacterMass
+
+instance LinearMass WordMass where
     toCharacterMass = error "WordMass toCharacterMass not implemented"
     toWordMass _ = id
     toSentenceMass = error "WordMass toSentenceMass not implemented"
     toParagraphMass toks wms = map fromIntegral $ upcastSegmentation wms (paragraphWordMass toks)
 
-instance LinearSegmentation [SentenceMass] where
+    fromLinearMass = toWordMass
+
+instance LinearMass SentenceMass where
     toCharacterMass = error "SentenceMass toCharacterMass not implemented"
     toWordMass = error "SentenceMass toWordMass not implemented"
     toSentenceMass _ = id
     toParagraphMass toks sms = map fromIntegral $ upcastSegmentation sms (paragraphSentenceMass toks)
 
-instance LinearSegmentation [ParagraphMass] where
+    fromLinearMass = toSentenceMass
+
+instance LinearMass ParagraphMass where
     toCharacterMass = error "ParagraphMass toCharacterMass not implemented"
     toWordMass toks pmss = go (splitAtParagraphs toks) pmss
         where go ps (ParagraphMass m:ms) = WordMass (wordCount (concat (take m ps))) : go (drop m ps) ms
@@ -62,7 +72,12 @@ instance LinearSegmentation [ParagraphMass] where
     toSentenceMass = error "ParagraphMass toSentenceMass not implemented"
     toParagraphMass _ = id
 
+    fromLinearMass = toParagraphMass
+
 -- TODO: JSON import/export of segmentations
+
+totalWordMass :: [Token] -> WordMass
+totalWordMass = WordMass . length . filter isWord
 
 totalSentenceMass :: [Token] -> SentenceMass
 totalSentenceMass = sum . paragraphSentenceMass

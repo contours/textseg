@@ -3,15 +3,10 @@
 {-# LANGUAGE ViewPatterns #-}
 import qualified Data.ByteString.Char8 as BS 
 import           Data.ByteString.Char8 (ByteString)
-import Graphics.Plot
-import Data.Packed
 import Control.Monad
-import Control.Applicative
 import Text.Printf
-import Data.List
 import Python.Interpreter (py_initialize)
 
-import Math.Combinatorics
 import NLP.Tokenizer
 import NLP.Segmentation
 import NLP.Segmentation.TextTiling
@@ -20,25 +15,38 @@ import NLP.Segmentation.NLTK
 import NLP.SegEval
 import Util
 
--- Reference segmentations for stargazer_hearst_1997 dataset
-refs :: [[ParagraphMass]]
-refs = [
-    [2,3,3,1,3,6,3],
-    [2,8,2,4,2,3],
-    [2,1,2,3,1,3,1,3,2,2,1],
-    [2,1,4,1,1,3,1,4,3,1],
-    [3,2,4,3,5,4],
-    [2,3,4,2,2,5,3],
-    [2,3,2,2,3,1,3,2,3]]
+type Segmentation t = [t]
+type Document = [Token]
+data Example t = Example Document [Segmentation t]
+type Dataset t = [Example t]
+
+stargazer_hearst_1997 :: FilePath -> IO (Dataset ParagraphMass)
+stargazer_hearst_1997 articlePath = do
+    txt <- BS.readFile articlePath
+    let doc = tokenize txt
+    let refs = [ [2,3,3,1,3,6,3]
+               , [2,8,2,4,2,3]
+               , [2,1,2,3,1,3,1,3,2,2,1]
+               , [2,1,4,1,1,3,1,4,3,1]
+               , [3,2,4,3,5,4]
+               , [2,3,4,2,2,5,3]
+               , [2,3,2,2,3,1,3,2,3]] :: [[ParagraphMass]]
+    return [Example doc refs]
+
+-- | Return the mean of the agreement drops (relative to the agreement between reference annotators) when each of the reference annotators is replaced by the one being tested in turn.
+-- This requires at least two reference annotations.
+agreement_drop :: Integral a => [[a]] -> [a] -> Double
+agreement_drop refs x = mean (map (agreement_fleiss_kappa refs -) agreements)
+    where agreements = map (agreement_fleiss_kappa.(x:).tail) (cycles refs)
 
 main = do
     py_initialize
 
-    txt <- BS.readFile "data/stargazer_hearst_1997/article.txt"
-    let toks = tokenize txt
-    printf "Paragraphs in the text: %d\n" (fromIntegral $ totalParagraphMass toks:: Int)
-    printf "Sentences in the text: %d\n" (fromIntegral $ totalSentenceMass toks:: Int)
-    printf "Words in the text: %d\n" (length $ filter isWord $ toks)
+    ds1 <- stargazer_hearst_1997 "data/stargazer_hearst_1997/article.txt"
+    showDatasetInfo ds1
+
+    let [Example toks refs] = ds1
+    let txt = BS.concat (map tokenText toks)
     let s1 = toParagraphMass toks $ textTiling toks
     let s2 = toParagraphMass toks $ nltkTextTiling (BS.unpack txt)
     let lda = trainLDA [toks]
@@ -46,13 +54,19 @@ main = do
     printf "TextTiling: %s\n" (show s1)
     printf "TextTilingNLTK: %s\n" (show s2)
     printf "TopicTiling: %s\n" (show s3)
-    let a = agreement_fleiss_kappa refs
     print $ mean $ map (similarity s1) refs
     print $ mean $ map (similarity s2) refs
-    printf "Original inter-annotator agreement: %f\n" a
-    printf "Agreement drop for TextTiling: %f\n" (a - agreement_fleiss_kappa (s1:refs))
-    printf "Agreement drop for TextTilingNLTK: %f\n" (a - agreement_fleiss_kappa (s2:refs))
-    printf "Agreement drop for TopicTiling: %f\n" (a - agreement_fleiss_kappa (s3:refs))
+    print $ mean $ map (similarity s3) refs
+    printf "Original inter-annotator agreement: %.4f\n" (agreement_fleiss_kappa refs)
+    printf "Agreement drop for TextTiling: %.4f\n" (agreement_drop refs s1)
+    printf "Agreement drop for TextTilingNLTK: %.4f\n" (agreement_drop refs s2)
+    printf "Agreement drop for TopicTiling: %.4f\n" (agreement_drop refs s3)
+
+showDatasetInfo :: [Example a] -> IO ()
+showDatasetInfo ds = do
+    printf "Dataset contains %d document(s): \n" (length ds)
+    forM_ ds $ \(Example toks segs) -> do
+        printf "%d paragraphs, %d sentences, %d words; %d refs (mean count %.1f)\n" (fromIntegral $ totalParagraphMass toks :: Int) (fromIntegral $ totalSentenceMass toks :: Int) (fromIntegral $ totalWordMass toks :: Int) (length segs) (mean (map length segs) :: Double)
 
 -- | k-fold cross validation.
 -- Randomly permuting the data set is up to the caller.
