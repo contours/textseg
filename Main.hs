@@ -15,7 +15,7 @@ import Math.Combinatorics
 import NLP.Tokenizer
 import NLP.Segmentation
 import NLP.Segmentation.TextTiling
---import NLP.Segmentation.TopicTiling
+import NLP.Segmentation.TopicTiling
 import NLP.Segmentation.NLTK
 import NLP.SegEval
 import Util
@@ -36,21 +36,23 @@ main = do
 
     txt <- BS.readFile "data/stargazer_hearst_1997/article.txt"
     let toks = tokenize txt
+    printf "Paragraphs in the text: %d\n" (fromIntegral $ totalParagraphMass toks:: Int)
+    printf "Sentences in the text: %d\n" (fromIntegral $ totalSentenceMass toks:: Int)
     printf "Words in the text: %d\n" (length $ filter isWord $ toks)
     let s1 = toParagraphMass toks $ textTiling toks
     let s2 = toParagraphMass toks $ nltkTextTiling (BS.unpack txt)
-    --let lda = trainLDA [toks]
-    --let s3 = toParagraphMass toks $ topicTiling lda toks
+    let lda = trainLDA [toks]
+    let s3 = toParagraphMass toks $ topicTiling lda toks
     printf "TextTiling: %s\n" (show s1)
     printf "TextTilingNLTK: %s\n" (show s2)
-    --printf "TopicTiling: %s\n" (show s3)
+    printf "TopicTiling: %s\n" (show s3)
     let a = agreement_fleiss_kappa refs
     print $ mean $ map (similarity s1) refs
     print $ mean $ map (similarity s2) refs
     printf "Original inter-annotator agreement: %f\n" a
     printf "Agreement drop for TextTiling: %f\n" (a - agreement_fleiss_kappa (s1:refs))
     printf "Agreement drop for TextTilingNLTK: %f\n" (a - agreement_fleiss_kappa (s2:refs))
-    --printf "Agreement drop for TopicTiling: %f\n" (a - agreement_fleiss_kappa (s3:refs))
+    printf "Agreement drop for TopicTiling: %f\n" (a - agreement_fleiss_kappa (s3:refs))
 
 -- | k-fold cross validation.
 -- Randomly permuting the data set is up to the caller.

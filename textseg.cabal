@@ -27,7 +27,6 @@ executable segmentation-showdown
                        hmatrix ==0.14.*,
                        hmatrix-gsl-stats ==0.1.*,
                        MonadRandom ==0.1.*,
-
-                       swift-lda ==0.4.*,
+                       lda ==0.0.*,
                        stemmer ==0.2.*
 

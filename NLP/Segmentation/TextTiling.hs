@@ -9,7 +9,7 @@ import System.IO.Unsafe
 import Data.Packed
 import Numeric.Container
 import Numeric.LinearAlgebra.Util
-import Numeric.GSL.Statistics
+import Numeric.GSL.Statistics (mean,stddev)
 import Data.Maybe
 import Data.Char
 import Data.List
@@ -17,10 +17,17 @@ import qualified Data.HashSet as Set
 import           Data.HashSet (HashSet)
 import Debug.Trace
 
+-- TODO: drop hmatrix interface, use Data.Vector directly.
+-- TODO: add optional configuration items:
+--  * stop words list
+--  * stemming enabled
+--  * numeric parameters: w, k, smoothing radius
+--  * use top-N valleys, or use threshold: high or low
+
 import Util hiding (mean)
 import NLP.Tokenizer
 import NLP.Stemmer
-import NLP.WordFrequencyVector
+import NLP.FrequencyVector
 import NLP.Segmentation
 
 stopWords :: HashSet ByteString
@@ -84,7 +91,8 @@ textTiling text = let
     threshold = mean valleyDepths - stddev valleyDepths
     boundaries1 = catMaybes $ zipWith assign gapIndices (toList gapDepths)
         where assign i score = if score > threshold then Just i else Nothing
-    -- remove too-close boundaries
+    -- Remove boundaries too near each other.
+    -- This heuristic is not described in the original paper, but is present in the NLTK implementation.
     boundaries = concatMap (\[a,b] -> if abs (a-b) < (4*w) then [a] else [a,b]) (window 2 2 boundaries1)
     in map WordMass $
         -- convert boundary indices to a list of word masses
