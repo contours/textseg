@@ -47,7 +47,7 @@ tokenize txt = createSentenceBreaks $
          Right ts -> ts
     where token = word <|> parBreak <|> whitespace <|> punctuation
           word = Word <$> takeWhile1 isWordChar
-          parBreak = ParagraphBreak <$> (string "\n\n" <|> string "\r\n\r\n")
+          parBreak = ParagraphBreak . BS.concat <$> many1 (string "\n\n" <|> string "\r\n\r\n")
           whitespace = Whitespace <$> takeWhile1 isSpace
           punctuation = Punctuation <$> takeWhile1 (\c -> not (isSpace c) && not (isWordChar c))
           isWordChar = inClass "a-zA-Z0-9_'"

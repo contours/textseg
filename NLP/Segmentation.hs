@@ -1,6 +1,7 @@
 {-# LANGUAGE ViewPatterns #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE MultiWayIf #-}
 module NLP.Segmentation
     ( LinearMass(..)
     , CharacterMass(..)
@@ -15,8 +16,6 @@ module NLP.Segmentation
     , sentenceWordMass
     , roundMasses
     ) where
-
-import Data.List
 
 import NLP.Tokenizer
 
@@ -128,14 +127,13 @@ roundIndices :: (Num a, Ord a) => [a] -> [a] -> [a]
 roundIndices [] _ = []
 roundIndices (_:ls) [u] = u : roundIndices ls [u] -- past the end
 roundIndices (l:ls) (u1:u2:us) =
-    case () of
-         () | l == u1 -> u1 : roundIndices ls (u1:u2:us)
-         () | l == u2 -> u2 : roundIndices ls (u1:u2:us)
-         () | l >  u2 -> roundIndices (l:ls) (u2:us)
-         () | l <  u1 -> u1 : roundIndices ls (u1:u2:us)
-         () | l <  u2 ->
-             case compare (l-u1) (u2-l) of
-                  LT -> u1 : roundIndices ls (u1:u2:us)
-                  EQ -> u1 : roundIndices ls (u1:u2:us)
-                  GT -> u2 : roundIndices ls (u1:u2:us)
+    if | l == u1 -> u1 : roundIndices ls (u1:u2:us)
+       | l == u2 -> u2 : roundIndices ls (u1:u2:us)
+       | l >  u2 -> roundIndices (l:ls) (u2:us)
+       | l <  u1 -> u1 : roundIndices ls (u1:u2:us)
+       | l <  u2 -> case compare (l-u1) (u2-l) of
+                         LT -> u1 : roundIndices ls (u1:u2:us)
+                         EQ -> u1 : roundIndices ls (u1:u2:us)
+                         GT -> u2 : roundIndices ls (u1:u2:us)
+roundIndices _ [] = error "roundIndices: empty list"
 

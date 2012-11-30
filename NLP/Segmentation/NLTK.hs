@@ -11,7 +11,7 @@ module NLP.Segmentation.NLTK
 import Python.Interpreter
 import Python.Exceptions
 import Python.Objects
-import Foreign.C.Types
+--import Foreign.C.Types
 import System.IO.Unsafe
 import qualified Data.ByteString.Char8 as BS
 import Control.Exception (assert)

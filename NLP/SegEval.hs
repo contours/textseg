@@ -15,8 +15,6 @@ import Python.Objects
 import Foreign.C.Types
 import System.IO.Unsafe
 
-import NLP.Segmentation
-
 -- | Evaluate the "S" metric of segmentation similarity.
 -- Ref: Chris Fournier and Diana Inkpen. 2012. Segmentation Similarity and Agreement. Proceedings of Human Language Technologies: The 2012 Annual Conference of the North American Chapter of the Association for Computational Linguistics. (HLT ‘12). Association for Computational Linguistics.
 similarity :: Integral a => [a] -> [a] -> Double

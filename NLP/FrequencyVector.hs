@@ -4,8 +4,6 @@ module NLP.FrequencyVector where
 
 import qualified Data.Map as M
 import           Data.Map (Map)
-import qualified Data.ByteString.Char8 as BS
-import           Data.ByteString.Char8 (ByteString)
 import qualified Data.Vector.Generic as V
 import Data.Vector.Unboxed (Vector)
 import Data.List
