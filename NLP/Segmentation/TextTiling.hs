@@ -12,10 +12,10 @@ import Numeric.LinearAlgebra.Util
 import Numeric.GSL.Statistics (mean,stddev)
 import Data.Maybe
 import Data.Char
-import Data.List
+--import Data.List
 import qualified Data.HashSet as Set
 import           Data.HashSet (HashSet)
-import Debug.Trace
+--import Debug.Trace
 
 -- TODO: drop hmatrix interface, use Data.Vector directly.
 -- TODO: add optional configuration items:
@@ -85,6 +85,7 @@ textTiling text = let
         if isLocalMinimum i
            then lpeak i + rpeak i - 2*(smoothed@>i)
            else 0
+    numValleys = length (filter (>0) (toList gapDepths))
     valleyDepths = fromList $ filter (>0) (toList gapDepths)
     -- Assign boundaries at any valley deeper than a cutoff threshold.
     -- Threshold is one standard deviation deeper than the mean valley depth.
@@ -94,7 +95,9 @@ textTiling text = let
     -- Remove boundaries too near each other.
     -- This heuristic is not described in the original paper, but is present in the NLTK implementation.
     boundaries = concatMap (\[a,b] -> if abs (a-b) < (4*w) then [a] else [a,b]) (window 2 2 boundaries1)
-    in map WordMass $
-        -- convert boundary indices to a list of word masses
-        zipWith (-) (boundaries++[totalWordMass]) (0:boundaries++[totalWordMass])
+    in 
+    case numValleys of
+         0 -> [WordMass totalWordMass]
+         -- convert boundary indices to a list of word masses
+         _ -> map WordMass $ zipWith (-) (boundaries++[totalWordMass]) (0:boundaries++[totalWordMass])
 
