@@ -27,6 +27,10 @@ executable test
                        hmatrix ==0.14.*,
                        hmatrix-gsl-stats ==0.1.*,
                        MonadRandom ==0.1.*,
-                       lda ==0.0.*,
-                       stemmer ==0.2.*
+                       stemmer ==0.2.*,
+                       -- SwiftLDA dependencies
+                       primitive==0.5.*,
+                       mwc-random==0.12.*,
+                       array==0.4.*
+        
 
