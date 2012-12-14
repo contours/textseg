@@ -7,7 +7,7 @@ module NLP.Segmentation.TopicTiling
     , Model
     ) where
 
-import NLP.LDA
+import NLP.SwiftLDA
 import qualified Data.Vector.Generic as V
 import Data.Vector.Generic ((!))
 import qualified Data.HashMap.Strict as M
@@ -15,30 +15,35 @@ import           Data.HashMap.Strict (HashMap)
 import Data.List
 import Numeric.GSL.Statistics (mean,stddev)
 import Data.Vector.Unboxed (Vector)
+import Control.Monad
+import Control.Monad.ST
 
 import NLP.Segmentation
 import NLP.Tokenizer
 import NLP.FrequencyVector
 
-data Model = Model WordMap LDA
+data Model = Model WordMap Finalized
 type WordMap = HashMap Token Int
 
 -- | Train the LDA classifier on a set of documents.
 trainLDA :: [[Token]] -> Model
-trainLDA documents =
-    -- TODO: get a random seed
-    let seed = 42
-        -- suggested parameters as in Riedl 2012
-        num_topics = 100
+trainLDA documents = runST $ do
+    -- suggested parameters as in Riedl 2012
+    let num_topics = 100
         -- XXX: 'a' may be scaled by 'k' (?), check the LDA source code
         a = 50
         b = 0.01
         num_iter = 500
-        lda0 = initial num_topics a b
         wordMap = mkWordMap (concat documents)
         docs0 = V.fromList (toDocs wordMap documents)
-        (_,lda) = runLDA seed num_iter lda0 docs0
-    in Model wordMap lda
+    -- using an arbitrary random seed
+    lda <- initial V.empty num_topics a b Nothing
+    runLDA num_iter lda docs0
+    f <- finalize lda
+    return $ Model wordMap f
+
+runLDA n lda docs = foldM (\_ t -> pass t lda docs) undefined [1..n]
+runLDA1 n lda doc = foldM (\_ t -> passOne t lda doc) undefined [1..n]
 
 mkWordMap :: [Token] -> WordMap
 mkWordMap toks = fst $ foldr fn (M.empty,0) (filter isWord toks)
@@ -60,12 +65,15 @@ takesV is xs = snd $ mapAccumL (\a b -> swap (V.splitAt (fromIntegral b) a)) xs 
 
 topicTiling :: Model -> [Token] -> [SentenceMass]
 topicTiling (Model wordMap lda) toks = let
-    -- TODO: get a random seed
-    seed = 42
     num_iter = 100
     -- get per-word topic assignments
-    (doc,_) = runLDA seed num_iter lda (V.singleton (toDoc wordMap 0 toks))
-    wordTopics = V.map (\(_,Just z) -> z) (snd (V.head doc))
+    doc :: Vector (W, Maybe Z)
+    (_,doc) = runST $ do
+        -- using an arbitrary random seed
+        x <- unfinalize V.empty lda
+        -- FIXME: use the most common assignment over all iterations
+        runLDA1 num_iter x (toDoc wordMap 0 toks)
+    wordTopics = V.map (\(_,Just z) -> z) doc
     -- split into sentences
     sentences = takesV (filter (>0) (sentenceWordMass toks)) wordTopics
     totalMass = fromIntegral (totalSentenceMass toks) :: Int
