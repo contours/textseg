@@ -4,10 +4,9 @@
 module NLP.Segmentation.TopicTiling
     ( trainLDA
     , topicTiling
-    , Model
+    , LDA.Model
     ) where
 
-import NLP.SwiftLDA
 import qualified Data.Vector.Generic as V
 import Data.Vector.Generic ((!))
 import qualified Data.HashMap.Strict as M
@@ -16,71 +15,62 @@ import Data.List
 import Numeric.GSL.Statistics (mean,stddev)
 import Data.Vector.Unboxed (Vector)
 import Control.Monad
-import Control.Monad.ST
+import Data.Char (toLower, isAlpha)
+import qualified Data.ByteString.Char8 as BS
 
 import NLP.Segmentation
 import NLP.Tokenizer
 import NLP.FrequencyVector
+import qualified NLP.LDA as LDA
+import Util (window)
 
-data Model = Model WordMap Finalized
-type WordMap = HashMap Token Int
+import NLP.Stemmer
+
+import Debug.Trace
 
 -- | Train the LDA classifier on a set of documents.
-trainLDA :: [[Token]] -> Model
-trainLDA documents = runST $ do
+trainLDA :: [[Token]] -> LDA.Model
+trainLDA documents = do
     -- suggested parameters as in Riedl 2012
     let num_topics = 100
         -- XXX: 'a' may be scaled by 'k' (?), check the LDA source code
         a = 50
         b = 0.01
         num_iter = 500
-        wordMap = mkWordMap (concat documents)
-        docs0 = V.fromList (toDocs wordMap documents)
-    -- using an arbitrary random seed
-    lda <- initial V.empty num_topics a b Nothing
-    runLDA num_iter lda docs0
-    f <- finalize lda
-    return $ Model wordMap f
+        words doc = [normalize w | Word w <- doc]
+    LDA.train a b num_topics num_iter (map words documents)
 
-runLDA n lda docs = foldM (\_ t -> pass t lda docs) undefined [1..n]
-runLDA1 n lda doc = foldM (\_ t -> passOne t lda doc) undefined [1..n]
+-- lowercase, discard all non-alphabetics, stem
+normalize = BS.pack . filter isAlpha . map toLower . stem English . BS.unpack
 
-mkWordMap :: [Token] -> WordMap
-mkWordMap toks = fst $ foldr fn (M.empty,0) (filter isWord toks)
-    where fn w (map,n) = if M.member w map
-                            then (map,n)
-                            else (M.insert w n map, n+1)
-
-toDocs :: WordMap -> [[Token]] -> [Doc]
-toDocs wordMap documents = zipWith (toDoc wordMap) [0..] documents
-
-toDoc :: WordMap -> Int {-^ document id -} -> [Token] -> Doc
-toDoc wordMap i toks = (i, toWordVec toks)
-    -- TODO: handle words which are not in the map
-    where toWordVec toks = V.fromList [(wordMap M.! w, Nothing) | w <- toks, isWord w]
-
-takesV :: (Integral i, V.Vector v a) => [i] -> v a -> [v a]
-takesV is xs = snd $ mapAccumL (\a b -> swap (V.splitAt (fromIntegral b) a)) xs is
-    where swap (a,b) = (b,a)
-
-topicTiling :: Model -> [Token] -> [SentenceMass]
-topicTiling (Model wordMap lda) toks = let
+topicTiling :: LDA.Model -> [Token] -> [SentenceMass]
+topicTiling model toks = let
     num_iter = 100
-    -- get per-word topic assignments
-    doc :: Vector (W, Maybe Z)
-    (_,doc) = runST $ do
+    -- TODO: take most common assignment over all iterations
+    [inferred] = LDA.topic_assignments $ LDA.infer num_iter model [[normalize w | Word w <- toks]]
+    wordTopics :: Vector Int
+    wordTopics = V.fromList (map snd inferred)
+    {-
+    -- get per-word topic assignments for each iteration
+    assignments :: [Vector Z]
+    assignments = map (V.map (\(_,Just z) -> z) . snd) $ runST $ do
         -- using an arbitrary random seed
-        x <- unfinalize V.empty lda
-        -- FIXME: use the most common assignment over all iterations
-        runLDA1 num_iter x (toDoc wordMap 0 toks)
-    wordTopics = V.map (\(_,Just z) -> z) doc
+        m <- unfinalize V.empty lda
+        scanM (\doc model -> runLDA1 1 model doc) (toDoc wordMap 0 toks) (replicate num_iter m)
+    -- take the most common assigment (mode) for each word
+    singleton :: Int -> Int -> Vector Int
+    singleton l i = V.replicate l 0 V.// [(i,1)]
+    wordTopics :: Vector Int
+    wordTopics = V.fromList $ map V.maxIndex [vsum (map (\a -> singleton num_topics (a V.! i)) assignments) | i<-[0..doc_len-1]]
+    -}
     -- split into sentences
     sentences = takesV (filter (>0) (sentenceWordMass toks)) wordTopics
     totalMass = fromIntegral (totalSentenceMass toks) :: Int
     -- represent each sentence as a topic frequency vector
-    -- and compute cosine similarity over sentence gaps
+    -- and compute a distance metric over sentence gaps
     topicDict = mkDictionary (V.toList wordTopics)
-    gapScores = V.fromList $ map (uncurry (cosineSimilarity' topicDict)) (zipWith (,) sentences (tail sentences)) :: Vector Double
+    metric a b = cosineSimilarity' topicDict a b
+    gapScores = V.fromList $ map (uncurry metric) (zipWith (,) sentences (tail sentences)) :: Vector Double
 
     -- TODO: unify the following process between TopicTiling and TextTiling.
 
@@ -108,13 +98,28 @@ topicTiling (Model wordMap lda) toks = let
     -- Assign boundaries at any valley deeper than a cutoff threshold.
     -- Threshold is one standard deviation deeper than the mean valley depth.
     threshold = mean valleyDepths - stddev valleyDepths
-    boundaries = V.foldr' (\x xs -> case x of 0 -> xs; _ -> x:xs) []
+    boundaries1 = V.foldr' (\x xs -> case x of 0 -> xs; _ -> x:xs) []
                           (V.imap assign gapDepths)
         where assign i score =
                   if score > threshold
                      then i+1
                      else 0
+    -- Remove boundaries too near each other. Heuristic adapted from NLTK's TextTiling implementation.
+    boundaries = concatMap (\[a,b] -> if abs (a-b) < 80 then [a] else [a,b]) (window 2 2 boundaries1)
     in map SentenceMass $
         -- convert boundary indices to a list of word masses
         zipWith (-) (boundaries++[totalMass]) (0:boundaries++[totalMass])
+
+--vsum = foldl1' (V.zipWith (+))
+
+scanM :: (Monad m) => (a -> b -> m a) -> a -> [b] -> m [a]
+scanM f q [] = return [q]
+scanM f q (x:xs) =
+   do q2 <- f q x
+      qs <- scanM f q2 xs
+      return (q:qs)
+
+takesV :: (Integral i, V.Vector v a) => [i] -> v a -> [v a]
+takesV is xs = snd $ mapAccumL (\a b -> swap (V.splitAt (fromIntegral b) a)) xs is
+    where swap (a,b) = (b,a)
 

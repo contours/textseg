@@ -14,7 +14,7 @@ cabal-version:       >=1.8
 
 executable test
   main-is:             Main.hs
-  ghc-options:         -W -O -threaded
+  ghc-options:         -W -O
   -- other-modules:       
   build-depends:       base ==4.6.*,
                        hashable ==1.1.*,
@@ -28,9 +28,7 @@ executable test
                        hmatrix-gsl-stats ==0.1.*,
                        MonadRandom ==0.1.*,
                        stemmer ==0.2.*,
-                       -- SwiftLDA dependencies
-                       primitive==0.5.*,
-                       mwc-random==0.12.*,
-                       array==0.4.*
-        
+                       directory ==1.2.*,
+                       unix ==2.6.*,
+                       process ==1.1.*
 
