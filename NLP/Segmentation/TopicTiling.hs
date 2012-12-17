@@ -104,7 +104,7 @@ topicTiling w model text = let
     freq x = frequencyVector' topicDict x V.// [(topicDict Map.! stopTopic, 0)]
     metric a b = cosineSimilarity (freq a) (freq b)
     gapScores :: Vector Double
-    gapScores = V.fromList [metric (vsum l) (vsum r) | (l,r) <- map (splitAt w) (window (2*w) 1 sentences)]
+    gapScores = V.fromList [metric (V.concat l) (V.concat r) | (l,r) <- map (splitAt w) (window (2*w) 1 sentences)]
     -- real sentence index of the i'th gap (gap is on the left of the specified sentence)
     gapIndex i = i+w
 
