@@ -28,17 +28,7 @@ frequencyVector' dict words = V.accumulate (+) zero freqs1
           freqs1 = V.map ((,1) . lookupIndex) words
           lookupIndex w = maybe (error $ "frequencyVector: encountered an element not in the dictionary") id (M.lookup w dict)
 
-cosineSimilarity :: Ord k => Map k Int -> [k] -> [k] -> Double
-cosineSimilarity d a' b' = dot a b / (dot a a * dot b b)
-    where a = frequencyVector d a' :: Vector Double
-          b = frequencyVector d b' :: Vector Double
-          dot x y = V.sum (V.zipWith (*) x y)
-
-cosineSimilarity'
-    :: (Ord k, V.Vector Vector k) =>
-       Map k Int -> Vector k -> Vector k -> Double
-cosineSimilarity' d a' b' = dot a b / (dot a a * dot b b)
-    where a = frequencyVector' d a' :: Vector Double
-          b = frequencyVector' d b' :: Vector Double
-          dot x y = V.sum (V.zipWith (*) x y)
+cosineSimilarity :: Vector Double -> Vector Double -> Double
+cosineSimilarity a b = dot a b / (dot a a * dot b b)
+    where dot x y = V.sum (V.zipWith (*) x y)
 

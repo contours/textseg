@@ -12,7 +12,6 @@ import Control.Exception
 import System.Directory
 import Control.Applicative
 import Data.Attoparsec.ByteString.Char8 hiding (take)
-import System.IO.Unsafe (unsafePerformIO)
 
 type Word = ByteString
 
@@ -29,9 +28,9 @@ data Model = Model {
 tmpdir_prefix = "/tmp/lda-" :: String
 path_to_lda = "" :: String
 
-train :: Double -> Double -> Int -> Int -> [[Word]] -> Model
-train alpha beta num_topics num_iterations docs = unsafePerformIO $
-    bracket (mkdtemp tmpdir_prefix) (\_ -> return ()) $ \tmpdir -> do
+train :: Double -> Double -> Int -> Int -> [[Word]] -> IO Model
+train alpha beta num_topics num_iterations docs =
+    bracket (mkdtemp tmpdir_prefix) (removeDirectoryRecursive) $ \tmpdir -> do
         let inputname = "train"
         let inputfile = tmpdir++"/"++inputname
         BS.writeFile inputfile (BS.pack (printf "%d\n" (length docs)))
@@ -52,9 +51,9 @@ train alpha beta num_topics num_iterations docs = unsafePerformIO $
             BS.readFile (tmpdir++"/wordmap.txt")
         return model
 
-infer :: Int -> Model -> [[Word]] -> Model
-infer num_iterations model docs = unsafePerformIO $
-    bracket (mkdtemp tmpdir_prefix) (\_ -> return ()) $ \tmpdir -> do
+infer :: Int -> Model -> [[Word]] -> IO Model
+infer num_iterations model docs =
+    bracket (mkdtemp tmpdir_prefix) (removeDirectoryRecursive) $ \tmpdir -> do
         let inputname = "infer"
         let inputfile = tmpdir++"/"++inputname
         BS.writeFile inputfile (BS.pack (printf "%d\n" (length docs)))

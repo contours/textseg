@@ -30,6 +30,7 @@ import NLP.Stemmer
 import NLP.FrequencyVector
 import NLP.Segmentation
 
+-- TODO: move this definition to NLP.Data, maybe. and pick up the duplicate in TopicTiling too
 stopWords :: HashSet ByteString
 --stopWords = Set.fromList $ BS.lines $ unsafePerformIO $ BS.readFile "data/jarmasz_szpakowicz_2003.list"
 stopWords = Set.fromList $ BS.lines $ unsafePerformIO $ BS.readFile "data/nltk_english_stopwords"
@@ -58,7 +59,7 @@ textTiling text = let
         map (uncurry score . splitAt k) (window (2*k) 1 psentences)
     dict = mkDictionary (map snd words)
     score (merge'->(_,lws)) (merge'->(i,rws)) =
-        (i, cosineSimilarity dict lws rws)
+        (i, cosineSimilarity (frequencyVector dict lws) (frequencyVector dict rws))
     -- Compute a depth score for each gap; this is the distance from the peaks on both sides of a valley, to the valley.
     -- First smooth the score function so we don't get confused by
     -- small valleys. This is done with a mean filter of small arbitrary size.
