@@ -35,6 +35,7 @@ stopWords :: HashSet ByteString
 --stopWords = Set.fromList $ BS.lines $ unsafePerformIO $ BS.readFile "data/jarmasz_szpakowicz_2003.list"
 stopWords = Set.fromList $ BS.lines $ unsafePerformIO $ BS.readFile "data/nltk_english_stopwords"
 
+-- TODO: allow desired number of segments to be given.
 textTiling :: [Token] -> [WordMass]
 textTiling text = let
     -- Lowercase, remove stop words, and stem, but keep

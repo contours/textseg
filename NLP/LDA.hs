@@ -21,7 +21,7 @@ data Model = Model {
     phi :: ByteString,
     theta :: ByteString,
     tassign :: ByteString,
-    twords :: ByteString,
+    --twords :: ByteString,
     wordmap :: ByteString
     }
 
@@ -35,9 +35,8 @@ train alpha beta num_topics num_iterations docs =
         let inputfile = tmpdir++"/"++inputname
         BS.writeFile inputfile (BS.pack (printf "%d\n" (length docs)))
         BS.appendFile inputfile $ BS.intercalate "\n" $ map (BS.intercalate " ") docs
-        -- TODO: remove twords, or make optional (debugging feature)
         errno <- withCurrentDirectory tmpdir $
-            system (printf "%slda -est -alpha %f -beta %f -ntopics %d -niters %d -twords 20 -savestep %d -dfile '%s' >/dev/null"
+            system (printf "%slda -est -alpha %f -beta %f -ntopics %d -niters %d -savestep %d -dfile '%s' >/dev/null"
                 path_to_lda alpha beta num_topics num_iterations num_iterations inputfile)
         case errno of { ExitFailure e -> fail (printf "lda failed with exit code %d" e); _ -> return () }
         -- now read back the model info
@@ -47,7 +46,7 @@ train alpha beta num_topics num_iterations docs =
             BS.readFile (prefix++"phi") <*>
             BS.readFile (prefix++"theta") <*>
             BS.readFile (prefix++"tassign") <*>
-            BS.readFile (prefix++"twords") <*>
+            --BS.readFile (prefix++"twords") <*>
             BS.readFile (tmpdir++"/wordmap.txt")
         return model
 
@@ -65,11 +64,10 @@ infer num_iterations model docs =
         BS.writeFile (prefix++"phi")     (phi model)
         BS.writeFile (prefix++"theta")   (theta model)
         BS.writeFile (prefix++"tassign") (tassign model)
-        BS.writeFile (prefix++"twords")  (twords model)
+        --BS.writeFile (prefix++"twords")  (twords model)
         BS.writeFile (tmpdir++"/wordmap.txt") (wordmap model)
-        -- TODO: remove twords, or make optional (debugging feature)
         errno <- withCurrentDirectory tmpdir $
-            system (printf "%slda -inf -dir '%s' -model '%s' -niters %d -twords 20 -dfile '%s' >/dev/null"
+            system (printf "%slda -inf -dir '%s' -model '%s' -niters %d -dfile '%s' >/dev/null"
                 path_to_lda tmpdir modelname num_iterations inputname)
         case errno of { ExitFailure e -> fail (printf "lda failed with exit code %d" e); _ -> return () }
         -- read inferences
@@ -79,7 +77,7 @@ infer num_iterations model docs =
             BS.readFile (prefix++"phi") <*>
             BS.readFile (prefix++"theta") <*>
             BS.readFile (prefix++"tassign") <*>
-            BS.readFile (prefix++"twords") <*>
+            --BS.readFile (prefix++"twords") <*>
             pure (wordmap model)
         return inference
 

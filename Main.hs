@@ -37,7 +37,7 @@ main = do
         let txt = BS.concat (map tokenText toks)
         let s1 = toParagraphMass toks $ textTiling toks
         let s2 = toParagraphMass toks $ nltkTextTiling (BS.unpack txt)
-        let s3 = toParagraphMass toks $ topicTiling lda toks
+        let s3 = toParagraphMass toks $ topicTiling 5 lda toks
         printf "----------------\n"
         printf "TextTiling: %s\n" (show s1)
         printf "TextTilingNLTK: %s\n" (show s2)

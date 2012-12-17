@@ -15,6 +15,11 @@ module NLP.Segmentation
     , paragraphSentenceMass
     , sentenceWordMass
     , roundMasses
+    , indicesToMasses
+    , massesToIndices
+    -- "low-level interface"
+    , downcastSegmentation
+    , upcastSegmentation
     ) where
 
 import NLP.Tokenizer
@@ -49,7 +54,7 @@ instance LinearMass CharacterMass where
 instance LinearMass WordMass where
     toCharacterMass = error "WordMass toCharacterMass not implemented"
     toWordMass _ = id
-    toSentenceMass = error "WordMass toSentenceMass not implemented"
+    toSentenceMass toks wms = map fromIntegral $ upcastSegmentation wms (sentenceWordMass toks)
     toParagraphMass toks wms = map fromIntegral $ upcastSegmentation wms (paragraphWordMass toks)
 
     fromLinearMass = toWordMass
@@ -64,10 +69,13 @@ instance LinearMass SentenceMass where
 
 instance LinearMass ParagraphMass where
     toCharacterMass = error "ParagraphMass toCharacterMass not implemented"
+    toWordMass toks pms = map fromIntegral $ downcastSegmentation (paragraphWordMass toks) pms
+    {-
     toWordMass toks pmss = go (splitAtParagraphs toks) pmss
         where go ps (ParagraphMass m:ms) = WordMass (wordCount (concat (take m ps))) : go (drop m ps) ms
               go [] _ = []
               go _ [] = []
+              -}
     toSentenceMass = error "ParagraphMass toSentenceMass not implemented"
     toParagraphMass _ = id
 
@@ -86,17 +94,26 @@ totalParagraphMass = ParagraphMass . (+1) . length . filter isParagraphBreak
 
 -- | Word mass of each paragraph.
 paragraphWordMass :: [Token] -> [WordMass]
-paragraphWordMass toks = map (WordMass . length . filter isWord) (splitAtParagraphs toks)
+paragraphWordMass toks = map totalWordMass (splitAtParagraphs toks)
 
 -- | Sentence mass of each paragraph.
 paragraphSentenceMass :: [Token] -> [SentenceMass]
-paragraphSentenceMass toks = map (SentenceMass . (+1) . length . filter isSentenceBreak) (splitAtParagraphs toks)
+paragraphSentenceMass toks = map (SentenceMass . (+1) . length . filter isSentenceBreak . trim) (splitAtParagraphs toks)
+    where trim (SentenceBreak _ : ts) = trim ts
+          trim ts | isSentenceBreak (last ts) = trim (init ts)
+          trim ts | otherwise = ts
 
 -- | Word mass of each sentence.
 sentenceWordMass :: [Token] -> [WordMass]
 sentenceWordMass toks = map (WordMass . length . filter isWord) (splitAtSentences toks)
 
-upcastSegmentation :: (Integral a,Show a) => [a] -> [a] -> [a]
+downcastSegmentation :: (Integral a,Integral b) => [a] -> [b] -> [a]
+downcastSegmentation ls1 us1 = go ls1 us1
+    where go ls (u:us) = sum (take (fromIntegral u) ls) : go (drop (fromIntegral u) ls) us
+          go [] _ = []
+          go _ [] = []
+
+upcastSegmentation :: Integral a => [a] -> [a] -> [a]
 upcastSegmentation ls1 us1 = go 0 (roundMasses ls1 us1) us1
     where go n (0:ls) us = go n ls us
           go n ls (0:us) = go n ls us
