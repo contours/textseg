@@ -6,6 +6,7 @@ module NLP.Segmentation.TopicTiling
     ( trainLDA
     , topicTiling
     , LDA.Model
+    , sentence_docsim
     ) where
 
 import qualified Data.Vector.Generic as V
@@ -79,6 +80,7 @@ topicTiling w model text = let
     sentenceWords = map wordsOf (splitAtSentences text)
     allWords = wordsOf text
     -- one inference step, sentence-wise (each sentence is considered a separate document)
+    -- FIXME: use output of previous iteration steps at each one
     infer1 :: IO (Vector Int)
     infer1 = V.fromList . map snd . concat . LDA.topic_assignments <$>
         LDA.infer 1 (lda model) [map snd ws | ws <- sentenceWords]
@@ -143,12 +145,89 @@ topicTiling w model text = let
     SentenceMass total = totalSentenceMass text
     masses = map SentenceMass $ indicesToMasses boundaries total
     in
-    (threshold, gapDepths)
-    `traceShow`
+    --(threshold, gapDepths)
+    --`traceShow`
     masses
+
+-- | Execute sentence-wise inference, then calculate similarity between sentences by comparing their topic distributions.
+sentence_docsim :: Model -> [Token] -> [SentenceMass]
+sentence_docsim model text = let
+    num_iter = 100
+    -- Lowercase, remove stop words, and stem, but keep
+    -- the original word-index of each word.
+    wordsOf s = [(i, stem' w) | (i, Word (BS.map toLower->w)) <- zip [0..] (filter isWord s)
+                              , not (Set.member w stopWords)]
+    sentenceWords = map wordsOf (splitAtSentences text)
+    allWords = wordsOf text
+    -- Sentence-wise inference (each sentence is considered a separate document)
+    infer :: IO [Vector Double]
+    infer = map V.fromList . LDA.p_topic_document <$>
+        LDA.infer num_iter (lda model) [map snd ws | ws <- sentenceWords]
+    -- Represent each sentence as a distribution over topics.
+    sentences = map fixup $ unsafePerformIO infer
+    -- Add a small probability to every topic and renormalize; klDivergence doesn't like zeroes.
+    fixup s = vnormalize $ V.map (+ 1e-5) s
+    metric a b = jsDivergence a b
+    gapScores :: Vector Double
+    gapScores = V.fromList (zipWith metric sentences (tail sentences))
+    gapIndex i = i+1
+
+    -- TODO: unify the following process between TopicTiling and TextTiling.
+
+    -- compute depth score for all local minima
+    numGaps = V.length gapScores
+    lpeak i = findPeak (-1) (gapScores!i) i
+    rpeak i = findPeak ( 1) (gapScores!i) i
+    findPeak dir x i =
+        if | i == 0 && dir == -1 -> max x (gapScores!i)
+           | i == numGaps-1 && dir == 1 -> max x (gapScores!i)
+           | gapScores!i >= x -> findPeak dir (gapScores!i) (i+dir)
+           | otherwise -> x
+    isLocalMinimum i | i == 0 = False
+    isLocalMinimum i | i == numGaps-1 = False
+    isLocalMinimum i = case (compare (gapScores!(i-1)) (gapScores!i), compare (gapScores!i) (gapScores!(i+1))) of
+                            (GT,LT) -> True
+                            (EQ,LT) -> True
+                            (GT,EQ) -> True
+                            _ -> False
+    gapDepths :: Storable.Vector Double
+    gapDepths = V.generate numGaps $ \i ->
+        if isLocalMinimum i
+           then lpeak i + rpeak i - 2*(gapScores!i)
+           else 0
+    valleyDepths = V.filter (>0) gapDepths
+    -- Assign boundaries at any valley deeper than a cutoff threshold.
+    -- Threshold is one standard deviation deeper than the mean valley depth.
+    threshold = mean valleyDepths - stddev valleyDepths
+    boundaries = catMaybes $ zipWith assign [0..] (V.toList gapDepths)
+        where assign i score =
+                  if score > threshold
+                     then Just (gapIndex i)
+                     else Nothing
+    SentenceMass total = totalSentenceMass text
+    masses = map SentenceMass $ indicesToMasses boundaries total
+    in
+    --(threshold, gapDepths)
+    --`traceShow`
+    masses
+
+-- | Jensen–Shannon divergence, a smoothed and symmetric version of 'klDivergence'.
+jsDivergence :: (Eq a, Floating a, V.Vector v a) => v a -> v a -> a
+jsDivergence p q = 0.5*klDivergence p m + 0.5*klDivergence q m
+    where m = V.map (0.5*) (V.zipWith (+) p q)
+
+-- | Kullback-Leibler divergence, a measure of the distance between two probability distributions.
+klDivergence :: (Eq a, Floating a, V.Vector v a) => v a -> v a -> a
+klDivergence p q = V.sum $ V.zipWith f p q
+    where f a b | a == 0 = 0
+                | b == 0 = error "klDivergence p q: undefined where q has zeroes and p doesn't"
+                | otherwise = a * log (a/b)
 
 vsum :: [Vector Int] -> Vector Int
 vsum = foldl1' (V.zipWith (+))
+
+vnormalize v = V.map (/n) v
+    where n = sqrt (V.sum (V.zipWith (*) v v))
 
 scanM :: (Monad m) => (a -> b -> m a) -> a -> [b] -> m [a]
 scanM _ q [] = return [q]

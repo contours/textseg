@@ -13,6 +13,8 @@ import System.Directory
 import Control.Applicative
 import Data.Attoparsec.ByteString.Char8 hiding (take)
 
+import Debug.Trace
+
 type Word = ByteString
 
 -- TODO: make these transparent
@@ -86,7 +88,7 @@ topic_assignments model = case parseOnly assignments (tassign model) of
                                Left err -> error err
                                Right as -> as
     where assignments = assignment `sepBy` string "\n"
-          assignment = pair `sepBy` space
+          assignment = pair `sepBy` string " "
           pair = do
               w <- word
               string ":"
@@ -94,6 +96,15 @@ topic_assignments model = case parseOnly assignments (tassign model) of
               return (BS.pack w,t)
           word = many1 (satisfy (/= ':'))
           topic = decimal :: Parser Int
+
+p_topic_document :: Model -> [[Double]]
+p_topic_document model = case parseOnly documents (theta model) of
+                              Left err -> error err
+                              Right ps -> ps
+    -- NB: separator is space AND newline
+    where documents = document `sepBy` string " \n"
+          document = p `sepBy` string " "
+          p = rational
 
 -- | Change to the given directory, perform an action, then change back.
 withCurrentDirectory :: FilePath -> IO a -> IO a

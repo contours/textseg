@@ -38,17 +38,21 @@ main = do
         let s1 = toParagraphMass toks $ textTiling toks
         let s2 = toParagraphMass toks $ nltkTextTiling (BS.unpack txt)
         let s3 = toParagraphMass toks $ topicTiling 5 lda toks
+        let s4 = toParagraphMass toks $ sentence_docsim lda toks
         printf "----------------\n"
         printf "TextTiling: %s\n" (show s1)
         printf "TextTilingNLTK: %s\n" (show s2)
         printf "TopicTiling: %s\n" (show s3)
+        printf "Unnamed1: %s\n" (show s4)
         print $ mean $ map (similarity s1) refs
         print $ mean $ map (similarity s2) refs
         print $ mean $ map (similarity s3) refs
+        print $ mean $ map (similarity s4) refs
         printf "Original inter-annotator agreement: %.4f\n" (agreement_fleiss_kappa refs)
         printf "Agreement drop for TextTiling: %.4f\n" (agreement_drop refs s1)
         printf "Agreement drop for TextTilingNLTK: %.4f\n" (agreement_drop refs s2)
         printf "Agreement drop for TopicTiling: %.4f\n" (agreement_drop refs s3)
+        printf "Agreement drop for Unnamed1: %.4f\n" (agreement_drop refs s4)
 
 showDatasetInfo :: [Annotated a] -> IO ()
 showDatasetInfo ds = do
