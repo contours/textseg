@@ -162,7 +162,8 @@ sentence_docsim model text = let
     sentences = map fixup $ unsafePerformIO infer
     -- Add a small probability to every topic and renormalize; klDivergence doesn't like zeroes.
     fixup s = vnormalize $ V.map (+ 1e-5) s
-    metric a b = jsDivergence a b
+    -- according to Wikipedia, the square root of the divergence is a metric, while the divergence itself is not.
+    metric a b = 1.0 - sqrt (jsDivergence a b)
     gapScores :: Vector Double
     gapScores = V.fromList (zipWith metric sentences (tail sentences))
     gapIndex i = i+1
