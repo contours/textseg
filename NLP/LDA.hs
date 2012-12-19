@@ -52,8 +52,8 @@ train alpha beta num_topics num_iterations docs =
             BS.readFile (tmpdir++"/wordmap.txt")
         return model
 
-infer :: Int -> Model -> [[Word]] -> IO Model
-infer num_iterations model docs =
+infer :: Int -> Bool -> Model -> [[Word]] -> IO Model
+infer num_iterations mode_method model docs =
     bracket (mkdtemp tmpdir_prefix) (removeDirectoryRecursive) $ \tmpdir -> do
         let inputname = "infer"
         let inputfile = tmpdir++"/"++inputname
@@ -69,8 +69,8 @@ infer num_iterations model docs =
         --BS.writeFile (prefix++"twords")  (twords model)
         BS.writeFile (tmpdir++"/wordmap.txt") (wordmap model)
         errno <- withCurrentDirectory tmpdir $
-            system (printf "%slda -inf -dir '%s' -model '%s' -niters %d -dfile '%s' >/dev/null"
-                path_to_lda tmpdir modelname num_iterations inputname)
+            system (printf "%slda -inf -dir '%s' -model '%s' -niters %d -dfile '%s' -modemethod %d >/dev/null"
+                path_to_lda tmpdir modelname num_iterations inputname (if mode_method then 1::Int else 0))
         case errno of { ExitFailure e -> fail (printf "lda failed with exit code %d" e); _ -> return () }
         -- read inferences
         let prefix = tmpdir++"/"++inputname++"."

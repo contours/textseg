@@ -79,21 +79,15 @@ topicTiling w model text = let
                               , not (Set.member w stopWords)]
     sentenceWords = map wordsOf (splitAtSentences text)
     allWords = wordsOf text
-    -- one inference step, sentence-wise (each sentence is considered a separate document)
-    -- FIXME: use output of previous iteration steps at each one
-    infer1 :: IO (Vector Int)
-    infer1 = V.fromList . map snd . concat . LDA.topic_assignments <$>
-        LDA.infer 1 (lda model) [map snd ws | ws <- sentenceWords]
-    -- all inference steps
-    inferN :: IO [Vector Int]
-    inferN = replicateM num_iter infer1
-    assignments = unsafePerformIO inferN
-    -- find the most common assigment (mode) for each word
-    assignmentCounts = [vsum (map (\a -> singleton (num_topics model) (a V.! i)) assignments) | i <- [0..length allWords-1]]
+    -- Infer word topic, sentence-wise (each sentence is considered a separate document).
+    -- Passing the True flag to infer enables returning the most common assignement, rather than the last.
+    infer :: IO [Int]
+    infer = map snd . concat . LDA.topic_assignments <$>
+        LDA.infer num_iter True (lda model) [map snd ws | ws <- sentenceWords]
     -- wordTopics is the final assignment of a topic to each word in sequence.
     -- This does not include the removed stop words.
     wordTopics0 :: [Int]
-    wordTopics0 = map V.maxIndex assignmentCounts
+    wordTopics0 = unsafePerformIO infer
     -- Insert the missing stop words, assigning the topic (-1) to them.
     stopTopic = (-1)
     wordTopics = V.replicate (fromIntegral (totalWordMass text)) (-1) V.// [(index,topic) | ((index,_),topic) <- zip allWords wordTopics0]
@@ -160,9 +154,10 @@ sentence_docsim model text = let
     sentenceWords = map wordsOf (splitAtSentences text)
     allWords = wordsOf text
     -- Sentence-wise inference (each sentence is considered a separate document)
+    -- TODO: try using mode method?
     infer :: IO [Vector Double]
     infer = map V.fromList . LDA.p_topic_document <$>
-        LDA.infer num_iter (lda model) [map snd ws | ws <- sentenceWords]
+        LDA.infer num_iter False (lda model) [map snd ws | ws <- sentenceWords]
     -- Represent each sentence as a distribution over topics.
     sentences = map fixup $ unsafePerformIO infer
     -- Add a small probability to every topic and renormalize; klDivergence doesn't like zeroes.
