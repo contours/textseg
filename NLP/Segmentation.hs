@@ -70,12 +70,6 @@ instance LinearMass SentenceMass where
 instance LinearMass ParagraphMass where
     toCharacterMass = error "ParagraphMass toCharacterMass not implemented"
     toWordMass toks pms = map fromIntegral $ downcastSegmentation (paragraphWordMass toks) pms
-    {-
-    toWordMass toks pmss = go (splitAtParagraphs toks) pmss
-        where go ps (ParagraphMass m:ms) = WordMass (wordCount (concat (take m ps))) : go (drop m ps) ms
-              go [] _ = []
-              go _ [] = []
-              -}
     toSentenceMass = error "ParagraphMass toSentenceMass not implemented"
     toParagraphMass _ = id
 

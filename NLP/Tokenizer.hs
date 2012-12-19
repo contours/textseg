@@ -61,7 +61,6 @@ createSentenceBreaks = map f
                    then SentenceBreak (BS.pack ".")
                    else t
 
-
 -- | Splits token stream according to 'ParagraphBreak's, discarding them.
 splitAtParagraphs :: [Token] -> [[Token]]
 splitAtParagraphs = splitAtToken isParagraphBreak

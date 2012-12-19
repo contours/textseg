@@ -1,3 +1,4 @@
+{-# LANGUAGE OverloadedStrings #-}
 module NLP.Data
     ( Segmentation
     , Document
@@ -6,6 +7,7 @@ module NLP.Data
 
     , stargazer_hearst_1997
     , moonstone
+    , galley2003_wsj
     ) where
 
 import qualified Data.ByteString.Char8 as BS 
@@ -59,4 +61,42 @@ moonstone_segmentation = do
     paras <- sepBy1 (tail <$> sepBy1 decimal (char ',')) endOfLine
     return $! map countRuns (transpose paras)
         where countRuns = map (ParagraphMass . length) . group
+
+galley2003_wsj :: FilePath -> IO (Dataset CharacterMass)
+galley2003_wsj path = do
+    -- texts are organized by segment count
+    let counts = [4,6,8,10,12,14,16,18,20,22] :: [Int]
+    let docsPerCount = 50 :: Int
+    let txtNames = [printf "%s/text/wsj/%d/%d.ref" path count doc
+            | count <- counts, doc <- [1..docsPerCount]]
+    let segNames = [printf "%s/segments/wsj/%d/%d.ref" path count doc
+            | count <- counts, doc <- [1..docsPerCount]]
+    txts <- mapM BS.readFile txtNames
+    segs <- mapM BS.readFile segNames
+    -- In this dataset, each sentence is a line.
+    -- Remove sentence breaks unless they are followed by a newline.
+    let fixSentenceBreaks (f : Whitespace w : xs) =
+            case (f, BS.elem '\n' w) of
+                 (Word s, True) -> Word s : SentenceBreak w : fixSentenceBreaks xs
+                 (SentenceBreak s, True) -> SentenceBreak (BS.append s w) : fixSentenceBreaks xs
+                 (Punctuation s, True) -> SentenceBreak (BS.append s w) : fixSentenceBreaks xs
+                 (Whitespace s, True) -> SentenceBreak (BS.append s w) : fixSentenceBreaks xs
+                 -- there shouldn't be any paragraph breaks, but just in case.
+                 (ParagraphBreak s, True) -> ParagraphBreak (BS.append s w) : fixSentenceBreaks xs
+                 -- no newline? no sentence break.
+                 (SentenceBreak s, False) -> Punctuation s : Whitespace w : fixSentenceBreaks xs
+                 -- otherwise leave things unaltered
+                 (_, False) -> f : fixSentenceBreaks (Whitespace w : xs)
+        -- other sentence breaks get removed as well
+        fixSentenceBreaks (SentenceBreak s : xs) = Punctuation s : fixSentenceBreaks xs
+        fixSentenceBreaks (other : xs) = other : fixSentenceBreaks xs
+        fixSentenceBreaks [] = []
+    -- clean up the break left over when there's a trailing newline at the end
+    let removeLastBreak xs = if isSentenceBreak (last xs) then init xs else xs
+    let docs = map (removeLastBreak . fixSentenceBreaks . tokenize) txts
+    let parse seg txt name = case parseOnly (decimal `sepBy` skipSpace) seg of
+                                  Right is -> indicesToMasses is (BS.length txt)
+                                  Left err -> error (printf "%s: %s" name err)
+    let masses = map (map CharacterMass) $ zipWith3 parse segs txts segNames
+    return (zipWith Annotated docs (map (:[]) masses))
 
