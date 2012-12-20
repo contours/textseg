@@ -1,11 +1,14 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE ViewPatterns #-}
+{-# LANGUAGE LambdaCase #-}
 import qualified Data.ByteString.Char8 as BS 
 --import           Data.ByteString.Char8 (ByteString)
 import Control.Monad
 import Text.Printf
 import Python.Interpreter (py_initialize)
+import System.Directory (doesFileExist)
+import Data.Binary
 
 import NLP.Tokenizer
 import NLP.Segmentation
@@ -27,35 +30,67 @@ main = do
     py_initialize
 
     --ds <- NLP.Data.stargazer_hearst_1997 "data/stargazer_hearst_1997/article.txt"
-    ds <- NLP.Data.moonstone "data/moonstone_corpus"
-    showDatasetInfo ds
+    --ds <- NLP.Data.moonstone "data/moonstone_corpus"
+    dss <- NLP.Data.galley2003_wsj "/srv/data/Galley2003"
 
-    -- TODO: Split up into CV folds properly. Don't train LDA on the test set.
-    let lda = trainLDA $ map (\(Annotated toks _) -> toks) ds
+    -- remove the 10th document from each count set
+    let trainSet = concatMap (removeIndex 10) dss
+    let testSet = map (!! 10) dss
 
-    forM_ ds $ \(Annotated toks refs) -> do
+    putStrLn "Training set info:"
+    showDatasetInfo trainSet
+    putStrLn "Test set info:"
+    showDatasetInfo testSet
+
+    let lda_file = "/srv/data/lda.model"
+    lda <- doesFileExist lda_file >>= \case
+        True -> do
+            printf "Loading trained LDA model from %s\n" lda_file
+            decodeFile lda_file
+        False -> do
+            printf "Training and saving LDA model to %s\n" lda_file
+            printf "(this may take a very long time)\n"
+            let lda = trainLDA $ map (\(Annotated _ toks _) -> toks) trainSet
+            encodeFile lda_file lda
+            return lda
+
+    forM_ testSet $ \(Annotated name toks (map (toSentenceMass toks)->refs)) -> do
         let txt = BS.concat (map tokenText toks)
-        let s1 = toParagraphMass toks $ textTiling toks
-        let s2 = toParagraphMass toks $ nltkTextTiling (BS.unpack txt)
-        let s3 = toParagraphMass toks $ topicTiling 5 lda toks
-        let s4 = toParagraphMass toks $ sentence_docsim lda toks
+        let ref = head refs
+        let s1 = fromLinearMass toks $ textTiling toks
+        --let s2 = fromLinearMass toks $ nltkTextTiling (BS.unpack txt)
+        let s3 = fromLinearMass toks $ topicTiling 5 lda toks
+        let s4 = fromLinearMass toks $ sentence_docsim lda toks
         let prn = show . map toInteger
-        printf "----------------\n"
+        printf "------------- %s\n" name
+        printf "Reference:      %s\n" (prn ref)
         printf "TextTiling:     %s\n" (prn s1)
-        printf "TextTilingNLTK: %s\n" (prn s2)
+        --printf "TextTilingNLTK: %s\n" (prn s2)
         printf "TopicTiling:    %s\n" (prn s3)
         printf "JS-divergence:  %s\n" (prn s4)
+        printf "Mean Pk for TextTiling:     %.4f\n" (mean (map (pk s1) refs) :: Double)
+        --printf "Mean Pk for TextTilingNLTK: %.4f\n" (mean (map (pk s2) refs))
+        printf "Mean Pk for TopicTiling:    %.4f\n" (mean (map (pk s3) refs) :: Double)
+        printf "Mean Pk for JS-divergence:  %.4f\n" (mean (map (pk s4) refs) :: Double)
+        {-
         printf "Original inter-annotator agreement:   %.4f\n" (agreement_fleiss_kappa refs)
         printf "Agreement change for TextTiling:     %+.4f\n" (-agreement_drop refs s1)
-        printf "Agreement change for TextTilingNLTK: %+.4f\n" (-agreement_drop refs s2)
+        --printf "Agreement change for TextTilingNLTK: %+.4f\n" (-agreement_drop refs s2)
         printf "Agreement change for TopicTiling:    %+.4f\n" (-agreement_drop refs s3)
         printf "Agreement change for JS-divergence:  %+.4f\n" (-agreement_drop refs s4)
+        -}
 
 showDatasetInfo :: [Annotated a] -> IO ()
 showDatasetInfo ds = do
     printf "Dataset contains %d document(s): \n" (length ds)
-    forM_ ds $ \(Annotated toks segs) -> do
-        printf "%d paragraphs, %d sentences, %d words; %d refs (mean seg count %.1f)\n" (fromIntegral $ totalParagraphMass toks :: Int) (fromIntegral $ totalSentenceMass toks :: Int) (fromIntegral $ totalWordMass toks :: Int) (length segs) (mean (map length segs) :: Double)
+    forM_ ds $ \(Annotated name toks segs) -> do
+        printf "%s: %d paragraphs, %d sentences, %d words; %d refs (mean segment count %.1f)\n"
+            name
+            (fromIntegral $ totalParagraphMass toks :: Int)
+            (fromIntegral $ totalSentenceMass toks :: Int)
+            (fromIntegral $ totalWordMass toks :: Int)
+            (length segs)
+            (mean (map length segs) :: Double)
 
 -- | k-fold cross validation.
 -- Randomly permuting the data set is up to the caller.
@@ -73,4 +108,9 @@ crossValidate k train test samples = map validate folds
           folds :: [([sample],[sample])] -- [(validation,training)]
           folds = map (splitAt nk . concat) (cycles subsamples)
           validate (v,t) = test (train t) v
+
+removeIndex :: Int -> [a] -> [a]
+removeIndex 0 (x:xs) = xs
+removeIndex _ [] = error "removeIndex: not enough elements"
+removeIndex i (x:xs) = x : removeIndex (i-1) xs
 

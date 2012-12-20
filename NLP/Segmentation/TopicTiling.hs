@@ -2,6 +2,7 @@
 {-# LANGUAGE MultiWayIf #-}
 {-# LANGUAGE StandaloneDeriving #-}
 {-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE DeriveGeneric #-}
 module NLP.Segmentation.TopicTiling
     ( trainLDA
     , topicTiling
@@ -27,6 +28,8 @@ import qualified Data.HashSet as Set
 import           Data.HashSet (HashSet)
 import qualified Data.Map as Map
 import Data.Maybe (catMaybes)
+import Text.Printf
+import Data.Binary
 
 import NLP.Segmentation
 import NLP.Tokenizer
@@ -35,6 +38,7 @@ import qualified NLP.LDA as LDA
 import Util (window)
 
 import NLP.Stemmer
+import NLP.Data (stopWords)
 
 import Debug.Trace
 
@@ -42,6 +46,10 @@ data Model = Model {
     lda :: LDA.Model,
     num_topics :: Int
     }
+
+instance Binary Model where
+    put (Model lda nt) = put lda >> put nt
+    get = Model <$> get <*> get
 
 -- | Train the LDA classifier on a set of documents.
 trainLDA :: [[Token]] -> Model
@@ -51,21 +59,13 @@ trainLDA documents =
         a = 50.0 / fromIntegral num_topics
         b = 0.01
         num_iter = 500
-        words doc = [stem' w | Word (BS.map toLower->w) <- doc
-                             , not (Set.member w stopWords)]
+        words doc = [w | Word (BS.map toLower->w) <- doc
+                       , not (Set.member w stopWords)]
         lda = unsafePerformIO $ LDA.train a b num_topics num_iter (map words documents)
     in Model {
         lda = lda,
         num_topics = num_topics
         }
-
--- TODO: move this definition to NLP.Data, maybe. and pick up the duplicate in TextTiling too
-stopWords :: HashSet ByteString
---stopWords = Set.fromList $ BS.lines $ unsafePerformIO $ BS.readFile "data/jarmasz_szpakowicz_2003.list"
-stopWords = Set.fromList $ BS.lines $ unsafePerformIO $ BS.readFile "data/nltk_english_stopwords"
-
-stem' :: ByteString -> ByteString
-stem' = BS.pack . stem English . BS.unpack
 
 -- | @topicTiling w model text@.
 -- @w@ is a sentence windowing parameter, and should be set based on the expected length of segments. Depends on the data set, strongly affects results.
@@ -73,14 +73,14 @@ stem' = BS.pack . stem English . BS.unpack
 topicTiling :: Int -> Model -> [Token] -> [SentenceMass]
 topicTiling w model text = let
     num_iter = 100
-    -- Lowercase, remove stop words, and stem, but keep
-    -- the original word-index of each word.
-    wordsOf s = [(i, stem' w) | (i, Word (BS.map toLower->w)) <- zip [0..] (filter isWord s)
+    -- Lowercase and remove stop words (don't stem).
+    -- Keep the original word-index of each word.
+    wordsOf s = [(i, w) | (i, Word (BS.map toLower->w)) <- zip [0..] (filter isWord s)
                               , not (Set.member w stopWords)]
     sentenceWords = map wordsOf (splitAtSentences text)
     allWords = wordsOf text
     -- Infer word topic, sentence-wise (each sentence is considered a separate document).
-    -- Passing the True flag to infer enables returning the most common assignement, rather than the last.
+    -- Passing the True flag to infer enables returning the most common assignment, rather than the last.
     infer :: IO [Int]
     infer = map snd . concat . LDA.topic_assignments <$>
         LDA.infer num_iter True (lda model) [map snd ws | ws <- sentenceWords]
@@ -129,8 +129,8 @@ topicTiling w model text = let
            else 0
     valleyDepths = V.filter (>0) gapDepths
     -- Assign boundaries at any valley deeper than a cutoff threshold.
-    -- Threshold is one standard deviation deeper than the mean valley depth.
-    threshold = mean valleyDepths - stddev valleyDepths
+    -- here, one stdev deeper than the mean
+    threshold = mean valleyDepths + stddev valleyDepths
     boundaries = catMaybes $ zipWith assign [0..] (V.toList gapDepths)
         where assign i score =
                   if score > threshold
@@ -138,18 +138,20 @@ topicTiling w model text = let
                      else Nothing
     SentenceMass total = totalSentenceMass text
     masses = map SentenceMass $ indicesToMasses boundaries total
+    showDebugInfo = unsafePerformIO $ do
+        printf "# TopicTiling threshold %.4f scores %s\n" threshold (show (V.toList gapScores))
+        return ()
     in
-    --(threshold, gapDepths)
-    --`traceShow`
+    showDebugInfo `seq`
     masses
 
 -- | Execute sentence-wise inference, then calculate similarity between sentences by comparing their topic distributions.
 sentence_docsim :: Model -> [Token] -> [SentenceMass]
 sentence_docsim model text = let
     num_iter = 100
-    -- Lowercase, remove stop words, and stem, but keep
+    -- Lowercase, remove stop words, but keep
     -- the original word-index of each word.
-    wordsOf s = [(i, stem' w) | (i, Word (BS.map toLower->w)) <- zip [0..] (filter isWord s)
+    wordsOf s = [(i, w) | (i, Word (BS.map toLower->w)) <- zip [0..] (filter isWord s)
                               , not (Set.member w stopWords)]
     sentenceWords = map wordsOf (splitAtSentences text)
     allWords = wordsOf text
@@ -193,8 +195,8 @@ sentence_docsim model text = let
            else 0
     valleyDepths = V.filter (>0) gapDepths
     -- Assign boundaries at any valley deeper than a cutoff threshold.
-    -- Threshold is one standard deviation deeper than the mean valley depth.
-    threshold = mean valleyDepths - stddev valleyDepths
+    -- here, one stdev deeper than the mean
+    threshold = mean valleyDepths + stddev valleyDepths
     boundaries = catMaybes $ zipWith assign [0..] (V.toList gapDepths)
         where assign i score =
                   if score > threshold

@@ -16,6 +16,7 @@ import Data.Char
 import qualified Data.HashSet as Set
 import           Data.HashSet (HashSet)
 --import Debug.Trace
+import Text.Printf
 
 -- TODO: drop hmatrix interface, use Data.Vector directly.
 -- TODO: add optional configuration items:
@@ -29,11 +30,7 @@ import NLP.Tokenizer
 import NLP.Stemmer
 import NLP.FrequencyVector
 import NLP.Segmentation
-
--- TODO: move this definition to NLP.Data, maybe. and pick up the duplicate in TopicTiling too
-stopWords :: HashSet ByteString
---stopWords = Set.fromList $ BS.lines $ unsafePerformIO $ BS.readFile "data/jarmasz_szpakowicz_2003.list"
-stopWords = Set.fromList $ BS.lines $ unsafePerformIO $ BS.readFile "data/nltk_english_stopwords"
+import NLP.Data (stopWords)
 
 -- TODO: allow desired number of segments to be given.
 textTiling :: [Token] -> [WordMass]
@@ -90,16 +87,21 @@ textTiling text = let
     numValleys = length (filter (>0) (toList gapDepths))
     valleyDepths = fromList $ filter (>0) (toList gapDepths)
     -- Assign boundaries at any valley deeper than a cutoff threshold.
-    -- Threshold is one standard deviation deeper than the mean valley depth.
+    -- here, one stdev shallower than the mean
     threshold = mean valleyDepths - stddev valleyDepths
     boundaries1 = catMaybes $ zipWith assign gapIndices (toList gapDepths)
         where assign i score = if score > threshold then Just i else Nothing
     -- Remove boundaries too near each other.
     -- This heuristic is not described in the original paper, but is present in the NLTK implementation.
     boundaries = concatMap (\[a,b] -> if abs (a-b) < (4*w) then [a] else [a,b]) (window 2 2 boundaries1)
+    showDebugInfo = unsafePerformIO $ do
+        printf "# TextTiling threshold %.4f scores %s\n" threshold (show (toList smoothed))
+        return ()
+    masses = case numValleys of
+                  0 -> [WordMass totalWordMass]
+                  -- convert boundary indices to a list of word masses
+                  _ -> map WordMass $ zipWith (-) (boundaries++[totalWordMass]) (0:boundaries++[totalWordMass])
     in 
-    case numValleys of
-         0 -> [WordMass totalWordMass]
-         -- convert boundary indices to a list of word masses
-         _ -> map WordMass $ zipWith (-) (boundaries++[totalWordMass]) (0:boundaries++[totalWordMass])
+    showDebugInfo `seq`
+    masses
 

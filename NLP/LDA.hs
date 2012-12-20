@@ -12,12 +12,12 @@ import Control.Exception
 import System.Directory
 import Control.Applicative
 import Data.Attoparsec.ByteString.Char8 hiding (take)
+import Data.Binary hiding (Word)
 
 import Debug.Trace
 
 type Word = ByteString
 
--- TODO: make these transparent
 data Model = Model {
     others :: ByteString,
     phi :: ByteString,
@@ -26,6 +26,10 @@ data Model = Model {
     --twords :: ByteString,
     wordmap :: ByteString
     }
+
+instance Binary Model where
+    get = Model <$> get <*> get <*> get <*> get <*> get
+    put (Model a b c d e) = mapM_ put [a,b,c,d,e]
 
 tmpdir_prefix = "/tmp/lda-" :: String
 path_to_lda = "" :: String

@@ -22,6 +22,8 @@ module NLP.Segmentation
     , upcastSegmentation
     ) where
 
+import qualified Data.ByteString.Char8 as BS
+
 import NLP.Tokenizer
 
 newtype CharacterMass = CharacterMass Int
@@ -46,7 +48,7 @@ class LinearMass s where
 instance LinearMass CharacterMass where
     toCharacterMass _ = id
     toWordMass = error "CharacterMass toWordMass not implemented"
-    toSentenceMass = error "CharacterMass toSentenceMass not implemented"
+    toSentenceMass toks cms = map fromIntegral $ upcastSegmentation cms (sentenceCharacterMass toks)
     toParagraphMass = error "CharacterMass toParagraphMass not implemented"
 
     fromLinearMass = toCharacterMass
@@ -70,10 +72,12 @@ instance LinearMass SentenceMass where
 instance LinearMass ParagraphMass where
     toCharacterMass = error "ParagraphMass toCharacterMass not implemented"
     toWordMass toks pms = map fromIntegral $ downcastSegmentation (paragraphWordMass toks) pms
-    toSentenceMass = error "ParagraphMass toSentenceMass not implemented"
+    toSentenceMass toks pms = map fromIntegral $ downcastSegmentation (paragraphSentenceMass toks) pms
     toParagraphMass _ = id
 
     fromLinearMass = toParagraphMass
+
+-- TODO: write QuickCheck properties for all of these conversions!
 
 -- TODO: JSON import/export of segmentations
 
@@ -100,6 +104,10 @@ paragraphSentenceMass toks = map (SentenceMass . (+1) . length . filter isSenten
 -- | Word mass of each sentence.
 sentenceWordMass :: [Token] -> [WordMass]
 sentenceWordMass toks = map (WordMass . length . filter isWord) (splitAtSentences toks)
+
+-- | Character mass of each sentence.
+sentenceCharacterMass :: [Token] -> [CharacterMass]
+sentenceCharacterMass toks = map (CharacterMass . sum . map (BS.length . tokenText)) (splitAtSentences toks)
 
 downcastSegmentation :: (Integral a,Integral b) => [a] -> [b] -> [a]
 downcastSegmentation ls1 us1 = go ls1 us1
@@ -146,5 +154,5 @@ roundIndices (l:ls) (u1:u2:us) =
                          LT -> u1 : roundIndices ls (u1:u2:us)
                          EQ -> u1 : roundIndices ls (u1:u2:us)
                          GT -> u2 : roundIndices ls (u1:u2:us)
-roundIndices _ [] = error "roundIndices: empty list"
+roundIndices _ [] = error "roundIndices: empty index list"
 

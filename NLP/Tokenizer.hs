@@ -46,11 +46,15 @@ tokenize txt = createSentenceBreaks $
          Left err -> error err
          Right ts -> ts
     where token = word <|> parBreak <|> whitespace <|> punctuation
-          word = Word <$> takeWhile1 isWordChar
+          word = do
+              cs <- takeWhile1 isWordChar
+              if not (BS.any (inClass "a-zA-Z0-9") cs)
+                 then return (Punctuation cs)
+                 else return (Word cs)
+          isWordChar = inClass "a-zA-Z0-9_'"
           parBreak = ParagraphBreak . BS.concat <$> many1 (string "\n\n" <|> string "\r\n\r\n")
           whitespace = Whitespace <$> takeWhile1 isSpace
           punctuation = Punctuation <$> takeWhile1 (\c -> not (isSpace c) && not (isWordChar c))
-          isWordChar = inClass "a-zA-Z0-9_'"
 
 -- For now, simply looks for isolated period characters.
 -- Ellipses ("...") will be ignored, but abbreviations ("U.S.") will cause false positives.

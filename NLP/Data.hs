@@ -8,6 +8,9 @@ module NLP.Data
     , stargazer_hearst_1997
     , moonstone
     , galley2003_wsj
+    , galley2003_wsj_1
+
+    , stopWords
     ) where
 
 import qualified Data.ByteString.Char8 as BS 
@@ -16,6 +19,9 @@ import Data.Attoparsec.ByteString.Char8
 import Control.Applicative
 import Data.List (transpose,group)
 import Text.Printf (printf)
+import qualified Data.HashSet as Set
+import           Data.HashSet (HashSet)
+import System.IO.Unsafe (unsafePerformIO)
 
 import NLP.Tokenizer
 import NLP.Segmentation
@@ -25,7 +31,11 @@ import NLP.Segmentation
 type Segmentation t = [t]
 type Document = [Token]
 type Dataset t = [Annotated t]
-data Annotated t = Annotated Document [Segmentation t]
+data Annotated t = Annotated {
+    name :: String,
+    document :: Document,
+    segmentation :: [Segmentation t]
+    }
 
 stargazer_hearst_1997 :: FilePath -> IO (Dataset ParagraphMass)
 stargazer_hearst_1997 articlePath = do
@@ -38,7 +48,7 @@ stargazer_hearst_1997 articlePath = do
                , [3,2,4,3,5,4]
                , [2,3,4,2,2,5,3]
                , [2,3,2,2,3,1,3,2,3]] :: [[ParagraphMass]]
-    return [Annotated doc refs]
+    return [Annotated articlePath doc refs]
 
 moonstone :: FilePath -> IO (Dataset ParagraphMass)
 moonstone path = do
@@ -52,7 +62,7 @@ moonstone path = do
                                         Right seg -> seg
                                         Left err -> error (printf "%s: %s" name err))
                    (zip csvs csvNames)
-    return (zipWith Annotated docs segs)
+    return (zipWith3 Annotated txtNames docs segs)
 
 -- | Parses a .csv file from the Moonstone dataset into a list of paragraph-mass segmentations.
 moonstone_segmentation :: Parser [[ParagraphMass]]
@@ -62,15 +72,16 @@ moonstone_segmentation = do
     return $! map countRuns (transpose paras)
         where countRuns = map (ParagraphMass . length) . group
 
-galley2003_wsj :: FilePath -> IO (Dataset CharacterMass)
-galley2003_wsj path = do
-    -- texts are organized by segment count
-    let counts = [4,6,8,10,12,14,16,18,20,22] :: [Int]
+-- texts are organized by segment count.
+galley2003_wsj :: FilePath -> IO [Dataset CharacterMass]
+galley2003_wsj path = mapM (galley2003_wsj_1 path) [4,6,8,10,12,14,16,18,20,22]
+
+galley2003_wsj_1 :: FilePath -> Int -> IO (Dataset CharacterMass)
+galley2003_wsj_1 path count = do
     let docsPerCount = 50 :: Int
-    let txtNames = [printf "%s/text/wsj/%d/%d.ref" path count doc
-            | count <- counts, doc <- [1..docsPerCount]]
-    let segNames = [printf "%s/segments/wsj/%d/%d.ref" path count doc
-            | count <- counts, doc <- [1..docsPerCount]]
+    let txtNames = map (printf "%s/text/wsj/%d/%d.ref" path count) [1..docsPerCount]
+    let segNames = map (printf "%s/segments/wsj/%d/%d.ref" path count) [1..docsPerCount]
+    let names = txtNames
     txts <- mapM BS.readFile txtNames
     segs <- mapM BS.readFile segNames
     -- In this dataset, each sentence is a line.
@@ -98,5 +109,11 @@ galley2003_wsj path = do
                                   Right is -> indicesToMasses is (BS.length txt)
                                   Left err -> error (printf "%s: %s" name err)
     let masses = map (map CharacterMass) $ zipWith3 parse segs txts segNames
-    return (zipWith Annotated docs (map (:[]) masses))
+    return (zipWith3 Annotated names docs (map (:[]) masses))
+
+stopWords :: HashSet BS.ByteString
+stopWords = Set.unions
+    [ Set.fromList $ BS.lines $ unsafePerformIO $ BS.readFile "data/nltk_english_stopwords"
+    -- A peculiarity of the WSJ dataset -- 's and n't endings are split into a separate word for some reason.
+    , Set.fromList ["'s", "n't"]]
 

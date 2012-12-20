@@ -3,10 +3,13 @@ Interface to the SegEval segmentation evaluation tool, using the MissingPy Pytho
 
 Must call @Python.Interpreter.py_initialize@ before evaluating any functions in this module.
 -}
+{-# LANGUAGE ParallelListComp #-}
 module NLP.SegEval
     ( similarity
     , agreement_fleiss_kappa
     , agreement_fleiss_pi
+    , pk
+    , mean_pairwise
     ) where
 
 import Python.Interpreter
@@ -27,6 +30,25 @@ similarity a b = unsafePerformIO $ handlePy exc2ioerror $ do
     dec <- callByName "segeval.similarity.SegmentationSimilarity.similarity" [a',b'] []
     x <- callByName "float" [dec] [] >>= fromPyObject :: IO CDouble
     return (realToFrac x)
+
+-- | Evaluate the Pk metric of segmentation similarity.
+pk :: Integral a => [a] -> [a] -> Double
+pk a b = unsafePerformIO $ handlePy exc2ioerror $ do
+    pyImport "segeval"
+    pyImport "segeval.window"
+    pyImport "segeval.window.Pk"
+    a' <- toPyObject (toCInts (massesToPositions a))
+    b' <- toPyObject (toCInts (massesToPositions b))
+    dec <- callByName "segeval.window.Pk.pk" [a',b'] []
+    x <- callByName "float" [dec] [] >>= fromPyObject :: IO CDouble
+    return (realToFrac x)
+
+mean_pairwise :: Integral a => ([a] -> [a] -> Double) -> [[a]] -> Double
+mean_pairwise fn segs = mean [fn (segs!!a) (segs!!b) | a <- [0..length segs-1], b <- [0..length segs-1], a /= b]
+    where mean xs = sum xs / fromIntegral (length xs)
+
+massesToPositions :: Integral a => [a] -> [Int]
+massesToPositions ms = concat [replicate (fromIntegral m) i | m <- ms | i <- [1..]]
 
 agreement_fleiss_kappa :: Integral a => [[a]] -> Double
 agreement_fleiss_kappa masseses = unsafePerformIO $ handlePy exc2ioerror $ do

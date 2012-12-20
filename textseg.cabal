@@ -30,5 +30,6 @@ executable test
                        stemmer ==0.2.*,
                        directory ==1.2.*,
                        unix ==2.6.*,
-                       process ==1.1.*
+                       process ==1.1.*,
+                       binary ==0.6.*
 
