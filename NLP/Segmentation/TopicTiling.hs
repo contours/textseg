@@ -37,7 +37,7 @@ import NLP.FrequencyVector
 import qualified NLP.LDA as LDA
 import Util (window)
 
-import NLP.Stemmer
+import qualified NLP.Stemmer
 import NLP.Data (stopWords)
 
 import Debug.Trace
@@ -51,6 +51,8 @@ instance Binary Model where
     put (Model lda nt) = put lda >> put nt
     get = Model <$> get <*> get
 
+stem = BS.pack . NLP.Stemmer.stem NLP.Stemmer.English . BS.unpack
+
 -- | Train the LDA classifier on a set of documents.
 trainLDA :: [[Token]] -> Model
 trainLDA documents =
@@ -59,8 +61,8 @@ trainLDA documents =
         a = 50.0 / fromIntegral num_topics
         b = 0.01
         num_iter = 500
-        words doc = [w | Word (BS.map toLower->w) <- doc
-                       , not (Set.member w stopWords)]
+        words doc = [stem w | Word (BS.map toLower->w) <- doc
+                            , not (Set.member w stopWords)]
         lda = unsafePerformIO $ LDA.train a b num_topics num_iter (map words documents)
     in Model {
         lda = lda,
@@ -73,12 +75,14 @@ trainLDA documents =
 topicTiling :: Int -> Model -> [Token] -> [SentenceMass]
 topicTiling w model text = let
     num_iter = 100
-    -- Lowercase and remove stop words (don't stem).
+    wordMap = LDA.parseWordMap (lda model)
+    -- Lowercase and remove stop words and unknown words.
     -- Keep the original word-index of each word.
-    wordsOf s = [(i, w) | (i, Word (BS.map toLower->w)) <- zip [0..] (filter isWord s)
-                              , not (Set.member w stopWords)]
+    wordsOf s = [(i, stem w) | (i, Word (BS.map toLower->w)) <- zip [0..] (filter isWord s)
+                             , not (Set.member w stopWords)
+                             , Map.member w wordMap]
     sentenceWords = map wordsOf (splitAtSentences text)
-    allWords = wordsOf text
+    words = wordsOf text
     -- Infer word topic, sentence-wise (each sentence is considered a separate document).
     -- Passing the True flag to infer enables returning the most common assignment, rather than the last.
     infer :: IO [Int]
@@ -90,7 +94,7 @@ topicTiling w model text = let
     wordTopics0 = unsafePerformIO infer
     -- Insert the missing stop words, assigning the topic (-1) to them.
     stopTopic = (-1)
-    wordTopics = V.replicate (fromIntegral (totalWordMass text)) (-1) V.// [(index,topic) | ((index,_),topic) <- zip allWords wordTopics0]
+    wordTopics = V.replicate (fromIntegral (totalWordMass text)) stopTopic V.// [(index,topic) | ((index,_),topic) <- zip words wordTopics0]
     sentences :: [Vector Int]
     sentences = takesV (sentenceWordMass text) wordTopics
     -- Represent each sentence as a topic frequency vector and compute a distance metric over sentence gaps.
@@ -139,7 +143,7 @@ topicTiling w model text = let
     SentenceMass total = totalSentenceMass text
     masses = map SentenceMass $ indicesToMasses boundaries total
     showDebugInfo = unsafePerformIO $ do
-        printf "# TopicTiling threshold %.4f scores %s\n" threshold (show (V.toList gapScores))
+        printf "# TopicTiling {'threshold': %.4f, 'score': %s, 'w': %d, 'predicted': %s}\n" threshold (show (V.toList gapScores)) w (show (map toInteger masses))
         return ()
     in
     showDebugInfo `seq`

@@ -13,6 +13,8 @@ import System.Directory
 import Control.Applicative
 import Data.Attoparsec.ByteString.Char8 hiding (take)
 import Data.Binary hiding (Word)
+import           Data.Map (Map)
+import qualified Data.Map as Map
 
 import Debug.Trace
 
@@ -109,6 +111,18 @@ p_topic_document model = case parseOnly documents (theta model) of
     where documents = document `sepBy` string " \n"
           document = p `sepBy` string " "
           p = rational
+
+parseWordMap :: Model -> Map Word Int
+parseWordMap model = case parseOnly themap (wordmap model) of
+                          Left err -> error err
+                          Right wm -> Map.fromList wm
+    where themap = decimal >> skipSpace >> (pair `sepBy` skipSpace)
+          pair = do
+              l <- takeTill isSpace
+              skipSpace
+              r <- decimal
+              skipSpace
+              return (l,r)
 
 -- | Change to the given directory, perform an action, then change back.
 withCurrentDirectory :: FilePath -> IO a -> IO a

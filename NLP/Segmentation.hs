@@ -105,9 +105,9 @@ paragraphSentenceMass toks = map (SentenceMass . (+1) . length . filter isSenten
 sentenceWordMass :: [Token] -> [WordMass]
 sentenceWordMass toks = map (WordMass . length . filter isWord) (splitAtSentences toks)
 
--- | Character mass of each sentence.
+-- | Character mass of each sentence (including the sentence break).
 sentenceCharacterMass :: [Token] -> [CharacterMass]
-sentenceCharacterMass toks = map (CharacterMass . sum . map (BS.length . tokenText)) (splitAtSentences toks)
+sentenceCharacterMass toks = map (CharacterMass . sum . map (BS.length . tokenText)) (splitAtSentences' toks)
 
 downcastSegmentation :: (Integral a,Integral b) => [a] -> [b] -> [a]
 downcastSegmentation ls1 us1 = go ls1 us1

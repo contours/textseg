@@ -7,8 +7,8 @@ module NLP.Data
 
     , stargazer_hearst_1997
     , moonstone
-    , galley2003_wsj
-    , galley2003_wsj_1
+    , galley2003
+    , galley2003_1
 
     , stopWords
     ) where
@@ -22,6 +22,7 @@ import Text.Printf (printf)
 import qualified Data.HashSet as Set
 import           Data.HashSet (HashSet)
 import System.IO.Unsafe (unsafePerformIO)
+import Control.Exception (assert)
 
 import NLP.Tokenizer
 import NLP.Segmentation
@@ -72,15 +73,21 @@ moonstone_segmentation = do
     return $! map countRuns (transpose paras)
         where countRuns = map (ParagraphMass . length) . group
 
--- texts are organized by segment count.
-galley2003_wsj :: FilePath -> IO [Dataset CharacterMass]
-galley2003_wsj path = mapM (galley2003_wsj_1 path) [4,6,8,10,12,14,16,18,20,22]
+-- | Texts are organized by segment count.
+-- @galley2003 path subset@
+-- Subset is either "wsj" or "tdt".
+galley2003 :: FilePath -> String -> IO [Dataset CharacterMass]
+galley2003 path subset = mapM (galley2003_1 path subset) [4,6,8,10,12,14,16,18,20,22]
 
-galley2003_wsj_1 :: FilePath -> Int -> IO (Dataset CharacterMass)
-galley2003_wsj_1 path count = do
+data Galley2003_Subset = Galley2003_TDT | Galley2003_WSJ
+
+-- | @galley2003_1 path subset count@
+-- Subset is either "wsj" or "tdt".
+galley2003_1 :: FilePath -> String -> Int -> IO (Dataset CharacterMass)
+galley2003_1 path subset count = do
     let docsPerCount = 50 :: Int
-    let txtNames = map (printf "%s/text/wsj/%d/%d.ref" path count) [1..docsPerCount]
-    let segNames = map (printf "%s/segments/wsj/%d/%d.ref" path count) [1..docsPerCount]
+    let txtNames = map (printf "%s/text/%s/%d/%d.ref" path subset count) [1..docsPerCount]
+    let segNames = map (printf "%s/segments/%s/%d/%d.ref" path subset count) [1..docsPerCount]
     let names = txtNames
     txts <- mapM BS.readFile txtNames
     segs <- mapM BS.readFile segNames
@@ -106,7 +113,10 @@ galley2003_wsj_1 path count = do
     let removeLastBreak xs = if isSentenceBreak (last xs) then init xs else xs
     let docs = map (removeLastBreak . fixSentenceBreaks . tokenize) txts
     let parse seg txt name = case parseOnly (decimal `sepBy` skipSpace) seg of
-                                  Right is -> indicesToMasses is (BS.length txt)
+                                  Right is ->
+                                      if and ['\n' == BS.index txt (i-1) | i<-is]
+                                         then indicesToMasses is (BS.length txt)
+                                         else error (printf "%s: not all segment boundaries correspond to newlines" name)
                                   Left err -> error (printf "%s: %s" name err)
     let masses = map (map CharacterMass) $ zipWith3 parse segs txts segNames
     return (zipWith3 Annotated names docs (map (:[]) masses))

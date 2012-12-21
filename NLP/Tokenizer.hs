@@ -5,6 +5,7 @@ module NLP.Tokenizer
     , tokenText
     , splitAtParagraphs
     , splitAtSentences
+    , splitAtSentences'
     , isWord
     , isParagraphBreak
     , isSentenceBreak
@@ -74,12 +75,25 @@ splitAtParagraphs = splitAtToken isParagraphBreak
 splitAtSentences :: [Token] -> [[Token]]
 splitAtSentences = splitAtToken (\t -> isSentenceBreak t || isParagraphBreak t)
 
--- | Generic version of @splitAt...@.
+-- | Splits token stream according to 'SentenceBreak's, keeping the break at the end of each segment.
+-- 'ParagraphBreak's are also taken into account as being implicit 'SentenceBreak's.
+splitAtSentences' :: [Token] -> [[Token]]
+splitAtSentences' = splitAtToken' (\t -> isSentenceBreak t || isParagraphBreak t)
+
+-- | Splits a token stream by the given predicate, discarding matching elements.
 splitAtToken :: (Token -> Bool) -> [Token] -> [[Token]]
 splitAtToken p toks =
     case findIndex p toks of
          Just 0  -> splitAtToken p (tail toks)
          Just ix -> take ix toks : splitAtToken p (drop (ix+1) toks)
+         Nothing -> if null toks then [] else [toks]
+
+-- | Splits a token stream by the given predicate, keeping the matching element at the end of each segment.
+splitAtToken' :: (Token -> Bool) -> [Token] -> [[Token]]
+splitAtToken' p toks =
+    case findIndex p toks of
+         Just 0  -> splitAtToken' p (tail toks)
+         Just ix -> take (ix+1) toks : splitAtToken' p (drop (ix+1) toks)
          Nothing -> if null toks then [] else [toks]
 
 isWord :: Token -> Bool

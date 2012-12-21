@@ -9,6 +9,7 @@ import Text.Printf
 import Python.Interpreter (py_initialize)
 import System.Directory (doesFileExist)
 import Data.Binary
+import System.Environment (getArgs)
 
 import NLP.Tokenizer
 import NLP.Segmentation
@@ -28,21 +29,24 @@ agreement_drop refs x = mean (map (agreement_fleiss_kappa refs -) agreements)
 
 main = do
     py_initialize
+    args <- getArgs
 
     --ds <- NLP.Data.stargazer_hearst_1997 "data/stargazer_hearst_1997/article.txt"
     --ds <- NLP.Data.moonstone "data/moonstone_corpus"
-    dss <- NLP.Data.galley2003_wsj "/srv/data/Galley2003"
+    dss <- NLP.Data.galley2003 "/srv/data/Galley2003" "tdt"
 
     -- remove the 10th document from each count set
     let trainSet = concatMap (removeIndex 10) dss
     let testSet = map (!! 10) dss
 
-    putStrLn "Training set info:"
-    showDatasetInfo trainSet
+    printf "Training set contains %d documents.\n" (length trainSet)
     putStrLn "Test set info:"
     showDatasetInfo testSet
 
-    let lda_file = "/srv/data/lda.model"
+    let lda_file = case args of
+                        [p] -> p
+                        _ -> "/srv/data/lda.model"
+
     lda <- doesFileExist lda_file >>= \case
         True -> do
             printf "Loading trained LDA model from %s\n" lda_file
@@ -59,7 +63,7 @@ main = do
         let ref = head refs
         let s1 = fromLinearMass toks $ textTiling toks
         --let s2 = fromLinearMass toks $ nltkTextTiling (BS.unpack txt)
-        let s3 = fromLinearMass toks $ topicTiling 5 lda toks
+        let s3 = fromLinearMass toks $ topicTiling 2 lda toks
         let s4 = fromLinearMass toks $ sentence_docsim lda toks
         let prn = show . map toInteger
         printf "------------- %s\n" name
@@ -72,6 +76,10 @@ main = do
         --printf "Mean Pk for TextTilingNLTK: %.4f\n" (mean (map (pk s2) refs))
         printf "Mean Pk for TopicTiling:    %.4f\n" (mean (map (pk s3) refs) :: Double)
         printf "Mean Pk for JS-divergence:  %.4f\n" (mean (map (pk s4) refs) :: Double)
+        printf "Mean S for TextTiling:     %.4f\n" (mean (map (similarity s1) refs) :: Double)
+        --printf "Mean S for TextTilingNLTK: %.4f\n" (mean (map (similarity s2) refs))
+        printf "Mean S for TopicTiling:    %.4f\n" (mean (map (similarity s3) refs) :: Double)
+        printf "Mean S for JS-divergence:  %.4f\n" (mean (map (similarity s4) refs) :: Double)
         {-
         printf "Original inter-annotator agreement:   %.4f\n" (agreement_fleiss_kappa refs)
         printf "Agreement change for TextTiling:     %+.4f\n" (-agreement_drop refs s1)

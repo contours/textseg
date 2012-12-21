@@ -15,7 +15,7 @@ import Data.Char
 --import Data.List
 import qualified Data.HashSet as Set
 import           Data.HashSet (HashSet)
---import Debug.Trace
+import Debug.Trace
 import Text.Printf
 
 -- TODO: drop hmatrix interface, use Data.Vector directly.
@@ -85,10 +85,12 @@ textTiling text = let
            then lpeak i + rpeak i - 2*(smoothed@>i)
            else 0
     numValleys = length (filter (>0) (toList gapDepths))
-    valleyDepths = fromList $ filter (>0) (toList gapDepths)
+    valleyDepths = filter (>0) (toList gapDepths)
     -- Assign boundaries at any valley deeper than a cutoff threshold.
     -- here, one stdev shallower than the mean
-    threshold = mean valleyDepths - stddev valleyDepths
+    threshold = if length valleyDepths == 0
+                   then 0
+                   else mean (fromList valleyDepths) - stddev (fromList valleyDepths)
     boundaries1 = catMaybes $ zipWith assign gapIndices (toList gapDepths)
         where assign i score = if score > threshold then Just i else Nothing
     -- Remove boundaries too near each other.
@@ -101,7 +103,12 @@ textTiling text = let
                   0 -> [WordMass totalWordMass]
                   -- convert boundary indices to a list of word masses
                   _ -> map WordMass $ zipWith (-) (boundaries++[totalWordMass]) (0:boundaries++[totalWordMass])
-    in 
-    showDebugInfo `seq`
-    masses
+    in
+    showDebugInfo `seq` masses
+    {-
+    if length psentences < 2
+       -- Text is too short. Return one segment.
+       then [WordMass totalWordMass]
+       else showDebugInfo `seq` masses
+       -}
 
