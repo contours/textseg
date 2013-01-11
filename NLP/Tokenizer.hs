@@ -29,7 +29,7 @@ data Token
     | SentenceBreak !ByteString
     | Punctuation !ByteString
     | Whitespace !ByteString
-    deriving (Eq,Show)
+    deriving (Eq,Show,Ord)
 
 tokenText :: Token -> ByteString
 tokenText (Word t) = t

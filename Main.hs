@@ -16,6 +16,7 @@ import NLP.Segmentation
 import NLP.Segmentation.TextTiling
 import NLP.Segmentation.TopicTiling
 import NLP.Segmentation.NLTK
+import qualified NLP.Segmentation.DP as DP
 import NLP.SegEval
 import qualified NLP.Data
 import           NLP.Data (Annotated(..),Dataset)
@@ -57,35 +58,26 @@ main = do
             encodeFile lda_file lda
             return lda
 
+    let adapt f toks = fromLinearMass toks (f toks)
+    let methods = [
+            ("TextTiling", adapt textTiling),
+            --("TextTilingNLTK", nltkTextTiling),
+            ("TopicTiling", adapt (topicTiling 2 lda)),
+            ("JS-divergence", adapt (sentence_docsim lda)),
+            ("DP baseline", adapt DP.baseline)
+            ] :: [(String, [Token] -> [SentenceMass])]
+
     forM_ testSet $ \(Annotated name toks (map (toSentenceMass toks)->refs)) -> do
         let txt = BS.concat (map tokenText toks)
         let ref = head refs
-        let s1 = fromLinearMass toks $ textTiling toks
-        --let s2 = fromLinearMass toks $ nltkTextTiling (BS.unpack txt)
-        let s3 = fromLinearMass toks $ topicTiling 2 lda toks
-        let s4 = fromLinearMass toks $ sentence_docsim lda toks
         let prn = show . map toInteger
         printf "------------- %s\n" name
         printf "Reference:      %s\n" (prn ref)
-        printf "TextTiling:     %s\n" (prn s1)
-        --printf "TextTilingNLTK: %s\n" (prn s2)
-        printf "TopicTiling:    %s\n" (prn s3)
-        printf "JS-divergence:  %s\n" (prn s4)
-        printf "Mean Pk for TextTiling:     %.4f\n" (mean (map (pk s1) refs) :: Double)
-        --printf "Mean Pk for TextTilingNLTK: %.4f\n" (mean (map (pk s2) refs))
-        printf "Mean Pk for TopicTiling:    %.4f\n" (mean (map (pk s3) refs) :: Double)
-        printf "Mean Pk for JS-divergence:  %.4f\n" (mean (map (pk s4) refs) :: Double)
-        printf "Mean S for TextTiling:     %.4f\n" (mean (map (similarity s1) refs) :: Double)
-        --printf "Mean S for TextTilingNLTK: %.4f\n" (mean (map (similarity s2) refs))
-        printf "Mean S for TopicTiling:    %.4f\n" (mean (map (similarity s3) refs) :: Double)
-        printf "Mean S for JS-divergence:  %.4f\n" (mean (map (similarity s4) refs) :: Double)
-        {-
-        printf "Original inter-annotator agreement:   %.4f\n" (agreement_fleiss_kappa refs)
-        printf "Agreement change for TextTiling:     %+.4f\n" (-agreement_drop refs s1)
-        --printf "Agreement change for TextTilingNLTK: %+.4f\n" (-agreement_drop refs s2)
-        printf "Agreement change for TopicTiling:    %+.4f\n" (-agreement_drop refs s3)
-        printf "Agreement change for JS-divergence:  %+.4f\n" (-agreement_drop refs s4)
-        -}
+        forM_ methods $ \(name, segment) -> do
+            let s = segment toks
+            printf "Segments of %s:\t%s\n"   name (prn s)
+            printf "Mean Pk for %s:\t%.4f\n" name (mean (map (pk s) refs) :: Double)
+            printf "Mean S  for %s:\t%.4f\n" name (mean (map (similarity s) refs) :: Double)
 
 showDatasetInfo :: [Annotated a] -> IO ()
 showDatasetInfo ds = do
