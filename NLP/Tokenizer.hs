@@ -1,11 +1,14 @@
 {-# LANGUAGE OverloadedStrings #-}
 module NLP.Tokenizer
     ( tokenize
+    , simpleTokenize
     , Token(..)
     , tokenText
     , splitAtParagraphs
     , splitAtSentences
     , splitAtSentences'
+    , splitAtToken
+    , splitAtToken'
     , isWord
     , isParagraphBreak
     , isSentenceBreak
@@ -15,7 +18,7 @@ module NLP.Tokenizer
 import qualified Data.ByteString.Char8 as BS
 import           Data.ByteString.Char8 (ByteString)
 import Data.Attoparsec.ByteString.Char8 hiding (isSpace,take)
-import Data.Char (isSpace)
+import Data.Char (isSpace,isAlphaNum)
 import Control.Applicative
 import Data.List
 import Data.Hashable (Hashable(..))
@@ -56,6 +59,16 @@ tokenize txt = createSentenceBreaks $
           parBreak = ParagraphBreak . BS.concat <$> many1 (string "\n\n" <|> string "\r\n\r\n")
           whitespace = Whitespace <$> takeWhile1 isSpace
           punctuation = Punctuation <$> takeWhile1 (\c -> not (isSpace c) && not (isWordChar c))
+
+-- | Tokenizes a simpler type of document.
+-- Each line is assumed to be a sentence. All words and punctuation are assumed to be separated by whitespace.
+-- Paragraph breaks are not generated.
+simpleTokenize :: ByteString -> [Token]
+simpleTokenize = intercalate [SentenceBreak "\n"] . map sentence . BS.lines
+    where sentence = intersperse (Whitespace " ") . map word . BS.words
+          word txt = if BS.any isAlphaNum txt
+                        then Word txt
+                        else Punctuation txt
 
 -- For now, simply looks for isolated period characters.
 -- Ellipses ("...") will be ignored, but abbreviations ("U.S.") will cause false positives.

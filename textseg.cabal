@@ -20,6 +20,7 @@ executable test
                        hashable ==1.1.*,
                        attoparsec ==0.10.*,
                        bytestring ==0.10.*,
+                       MissingH ==1.2.*,
                        MissingPy ==0.10.*,
                        unordered-containers ==0.2.*,
                        vector ==0.10.*,
@@ -31,5 +32,6 @@ executable test
                        directory ==1.2.*,
                        unix ==2.6.*,
                        process ==1.1.*,
-                       binary ==0.6.*
+                       binary ==0.6.*,
+                       filepath ==1.3.*
 

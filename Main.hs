@@ -33,11 +33,10 @@ main = do
 
     --ds <- NLP.Data.stargazer_hearst_1997 "data/stargazer_hearst_1997/article.txt"
     --ds <- NLP.Data.moonstone "data/moonstone_corpus"
-    dss <- NLP.Data.galley2003 "/srv/data/Galley2003" "tdt"
+    ds <- NLP.Data.choi "/srv/data/choi/1/3-11"
 
-    -- remove the 10th document from each count set
-    let trainSet = concatMap (removeIndex 10) dss
-    let testSet = map (!! 10) dss
+    let trainSet = removeIndex 10 ds
+    let testSet = [ds !! 10]
 
     printf "Training set contains %d documents.\n" (length trainSet)
     putStrLn "Test set info:"

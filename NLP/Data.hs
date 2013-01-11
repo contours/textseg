@@ -9,6 +9,7 @@ module NLP.Data
     , moonstone
     , galley2003
     , galley2003_1
+    , choi
 
     , stopWords
     ) where
@@ -23,6 +24,8 @@ import qualified Data.HashSet as Set
 import           Data.HashSet (HashSet)
 import System.IO.Unsafe (unsafePerformIO)
 import Control.Exception (assert)
+import System.Path.Glob (glob)
+import System.FilePath (combine)
 
 import NLP.Tokenizer
 import NLP.Segmentation
@@ -120,6 +123,17 @@ galley2003_1 path subset count = do
                                   Left err -> error (printf "%s: %s" name err)
     let masses = map (map CharacterMass) $ zipWith3 parse segs txts segNames
     return (zipWith3 Annotated names docs (map (:[]) masses))
+
+-- | Accepts a path containing *.ref files, such as "/home/you/data/choi/2/6-8"
+choi :: FilePath -> IO (Dataset SentenceMass)
+choi path = do
+    names <- glob (combine path "*.ref")
+    txts <- mapM BS.readFile names
+    let f = splitAtToken (\t -> tokenText t == "==========") . simpleTokenize
+    -- 'init' drops the extra trailing sentence break from each segment
+    let doc = concat . map init . f
+    let seg = (:[]) . map (SentenceMass . length . drop 1 . filter isSentenceBreak) . f
+    return (zipWith3 Annotated names (map doc txts) (map seg txts))
 
 stopWords :: HashSet BS.ByteString
 stopWords = Set.unions
