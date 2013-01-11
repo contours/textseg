@@ -8,20 +8,24 @@ import Data.Graph.Inductive
 import Data.List (nub)
 import qualified Data.Map as Map
 import qualified Data.ByteString.Char8 as BS
+import Data.Char (toLower)
+import qualified Data.HashSet as Set
 
 import NLP.Tokenizer
 import NLP.Segmentation
 import qualified NLP.Stemmer
+import NLP.Data (stopWords)
 
 import Debug.Trace
 
-stem = BS.pack . NLP.Stemmer.stem NLP.Stemmer.English . BS.unpack
+stem = BS.pack . NLP.Stemmer.stem NLP.Stemmer.English . map toLower . BS.unpack
 
 baseline :: [Token] -> [SentenceMass]
 baseline toks = let
-    words = nub (map (stem . tokenText) (filter isWord toks))
+    ok w = isWord w && not (Set.member (tokenText w) stopWords)
+    words = nub (map (stem . tokenText) (filter ok toks))
     wordMap = Map.fromList (zip words [0..])
-    in baseline' $ map (map ((wordMap Map.!) . stem . tokenText) . filter isWord) (splitAtSentences toks)
+    in baseline' $ map (map ((wordMap Map.!) . stem . tokenText) . filter ok) (splitAtSentences toks)
 
 -- | Algorithm from "A statistical model for domain-independent text segmentation" (Utiyama & Ishara, 2001).
 -- Argument: list of sentences, where each word is an integer word ID starting at 0.

@@ -136,8 +136,11 @@ choi path = do
     return (zipWith3 Annotated names (map doc txts) (map seg txts))
 
 stopWords :: HashSet BS.ByteString
-stopWords = Set.unions
+stopWords = Set.fromList $ BS.lines $ unsafePerformIO $ BS.readFile "data/choi_stopwords.list"
+{-
+    Set.unions
     [ Set.fromList $ BS.lines $ unsafePerformIO $ BS.readFile "data/nltk_english_stopwords"
     -- A peculiarity of the WSJ dataset -- 's and n't endings are split into a separate word for some reason.
     , Set.fromList ["'s", "n't"]]
+    -}
 
