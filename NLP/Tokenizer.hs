@@ -2,6 +2,7 @@
 module NLP.Tokenizer
     ( tokenize
     , simpleTokenize
+    , breakApostrophes
     , Token(..)
     , tokenText
     , splitAtParagraphs
@@ -12,6 +13,7 @@ module NLP.Tokenizer
     , isWord
     , isParagraphBreak
     , isSentenceBreak
+    , isPunctuation
     , wordCount
     ) where
 
@@ -70,13 +72,27 @@ simpleTokenize = intercalate [SentenceBreak "\n"] . map sentence . BS.lines
                         then Word txt
                         else Punctuation txt
 
--- For now, simply looks for isolated period characters.
--- Ellipses ("...") will be ignored, but abbreviations ("U.S.") will cause false positives.
+-- | For compatibility. Finds words that end in "n't", "'m", "'s", or similar suffixes, and breaks that suffix off into a separate Word  token.
+breakApostrophes :: [Token] -> [Token]
+breakApostrophes = concatMap f
+    where f (Word w) | isSuffix "n't" w = [Word (dropEnd 3 w), Word "n't"]
+                     | isSuffix "'m"  w = [Word (dropEnd 2 w), Word "'m"]
+                     | isSuffix "'s"  w = [Word (dropEnd 2 w), Word "'s"]
+                     | isSuffix "'d"  w = [Word (dropEnd 2 w), Word "'d"]
+                     | isSuffix "'re"  w = [Word (dropEnd 3 w), Word "'re"]
+                     | isSuffix "'ve"  w = [Word (dropEnd 3 w), Word "'ve"]
+                     | isSuffix "'ll"  w = [Word (dropEnd 3 w), Word "'ll"]
+          f other = [other]
+          isSuffix s xs = not (BS.null xs) && s == BS.drop (BS.length xs - BS.length s) xs
+          dropEnd n xs = BS.take (BS.length xs - n) xs
+
+-- For now, simply looks for isolated period characters, question marks, and exclamation marks.
+-- Ellipses ("...") may cause false negatives and abbreviations ("U.S.") will cause false positives.
 -- TODO: use a more sophisticated algorithm.
 createSentenceBreaks :: [Token] -> [Token]
 createSentenceBreaks = map f
-    where f t = if t == Punctuation (BS.pack ".")
-                   then SentenceBreak (BS.pack ".")
+    where f t = if tokenText t `elem` [".","?","!"]
+                   then SentenceBreak (tokenText t)
                    else t
 
 -- | Splits token stream according to 'ParagraphBreak's, discarding them.
@@ -118,6 +134,9 @@ isSentenceBreak _ = False
 isParagraphBreak :: Token -> Bool
 isParagraphBreak (ParagraphBreak _) = True
 isParagraphBreak _ = False
+isPunctuation :: Token -> Bool
+isPunctuation (Punctuation _) = True
+isPunctuation _ = False
 
 wordCount :: [Token] -> Int
 wordCount = length . filter isWord

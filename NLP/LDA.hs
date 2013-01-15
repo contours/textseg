@@ -15,6 +15,7 @@ import Data.Attoparsec.ByteString.Char8 hiding (take)
 import Data.Binary hiding (Word)
 import           Data.Map (Map)
 import qualified Data.Map as Map
+import Data.List
 
 import Debug.Trace
 
@@ -103,14 +104,38 @@ topic_assignments model = case parseOnly assignments (tassign model) of
           word = many1 (satisfy (/= ':'))
           topic = decimal :: Parser Int
 
+-- | The topic-document distributions; a num_documents by num_topics matrix.
 p_topic_document :: Model -> [[Double]]
 p_topic_document model = case parseOnly documents (theta model) of
                               Left err -> error err
-                              Right ps -> ps
+                              Right ps -> dropWhileEnd null ps
     -- NB: separator is space AND newline
     where documents = document `sepBy` string " \n"
           document = p `sepBy` string " "
           p = rational
+
+-- | The word-topic distributions; a num_topics by num_words matrix.
+p_word_topic :: Model -> [[Double]]
+p_word_topic model = case parseOnly topics (phi model) of
+                          Left err -> error err
+                          Right ps -> dropWhileEnd null ps
+    where topics = topic `sepBy` string " \n"
+          topic = p `sepBy` string " "
+          p = rational
+
+-- | Compute the log-likelihood of a new document.
+logLikelihood :: Int -> Model -> [Word] -> IO Double
+logLikelihood num_iterations model0 doc = do
+    model <- infer num_iterations False model0 [doc]
+    let [theta] = p_topic_document model
+        phi = p_word_topic model
+        num_topics = length theta
+        num_words = length (head phi)
+        doc' = map (\w -> Map.findWithDefault (-1) w (parseWordMap model)) doc
+        count v = fromIntegral (length (filter (==v) doc'))
+        ll = sum [count v * log (sum [(theta!!t) * (phi!!t!!v) | t <- [0..num_topics-1]]) | v <- [0..num_words-1]]
+    print ll
+    return ll
 
 parseWordMap :: Model -> Map Word Int
 parseWordMap model = case parseOnly themap (wordmap model) of

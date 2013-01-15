@@ -26,6 +26,7 @@ import System.IO.Unsafe (unsafePerformIO)
 import Control.Exception (assert)
 import System.Path.Glob (glob)
 import System.FilePath (combine)
+import qualified Data.HashMap.Strict as HM
 
 import NLP.Tokenizer
 import NLP.Segmentation
@@ -136,11 +137,39 @@ choi path = do
     return (zipWith3 Annotated names (map doc txts) (map seg txts))
 
 stopWords :: HashSet BS.ByteString
-stopWords = Set.fromList $ BS.lines $ unsafePerformIO $ BS.readFile "data/choi_stopwords.list"
-{-
-    Set.unions
-    [ Set.fromList $ BS.lines $ unsafePerformIO $ BS.readFile "data/nltk_english_stopwords"
-    -- A peculiarity of the WSJ dataset -- 's and n't endings are split into a separate word for some reason.
-    , Set.fromList ["'s", "n't"]]
-    -}
+stopWords = Set.unions
+    -- Choi's stopwords list.
+    [ Set.fromList $ BS.lines $ unsafePerformIO $ BS.readFile "data/choi_stopwords.list"
+    -- Some additional suffixes.
+    , Set.fromList ["'d","'re","'ve","'ll"]
+    ]
 
+{-
+data JsonRep t = JsonRep {
+    -- TODO: add the type. assumed linear.
+    jsItems :: [JsonDoc t]
+    }
+
+data JsonDoc t = JsonDoc {
+    jsName :: String,
+    jsSegs :: [Segmentation t]
+    }
+
+instance FromJSON (JsonRep t) where
+    parseJSON (Object v) = do
+        hm <- v .: "items"
+        hm 
+
+instance FromJSON (JsonDoc t) where
+    parseJSON (Object v
+
+
+-- Assumes interview texts are strictly one-sentence-per-line, without speaker names, and with no further explicit tokenization.
+contours :: FilePath -> IO (Dataset SentenceMass)
+contours path = do
+    txtNames <- glob (combine path "*.txt")
+    repTxt <- BS.readFile (combine path "segmentations.json")
+    rep <- either fail return (JSON.eitherDecode repTxt)
+
+
+-}

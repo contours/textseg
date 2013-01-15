@@ -42,19 +42,12 @@ import NLP.Data (stopWords)
 
 import Debug.Trace
 
-data Model = Model {
-    lda :: LDA.Model,
-    num_topics :: Int
-    }
-
-instance Binary Model where
-    put (Model lda nt) = put lda >> put nt
-    get = Model <$> get <*> get
-
-stem = BS.pack . NLP.Stemmer.stem NLP.Stemmer.English . BS.unpack
+--stem = BS.pack . NLP.Stemmer.stem NLP.Stemmer.English . BS.unpack
+-- stemming disabled
+stem = id
 
 -- | Train the LDA classifier on a set of documents.
-trainLDA :: [[Token]] -> Model
+trainLDA :: [[Token]] -> LDA.Model
 trainLDA documents =
     -- suggested parameters as in Riedl 2012
     let num_topics = 100
@@ -63,19 +56,15 @@ trainLDA documents =
         num_iter = 500
         words doc = [stem w | Word (BS.map toLower->w) <- doc
                             , not (Set.member w stopWords)]
-        lda = unsafePerformIO $ LDA.train a b num_topics num_iter (map words documents)
-    in Model {
-        lda = lda,
-        num_topics = num_topics
-        }
+    in unsafePerformIO $ LDA.train a b num_topics num_iter (map words documents)
 
 -- | @topicTiling w model text@.
 -- @w@ is a sentence windowing parameter, and should be set based on the expected length of segments. Depends on the data set, strongly affects results.
 -- TODO: allow desired number of segments to be given.
-topicTiling :: Int -> Model -> [Token] -> [SentenceMass]
+topicTiling :: Int -> LDA.Model -> [Token] -> [SentenceMass]
 topicTiling w model text = let
     num_iter = 100
-    wordMap = LDA.parseWordMap (lda model)
+    wordMap = LDA.parseWordMap model
     -- Lowercase and remove stop words and unknown words.
     -- Keep the original word-index of each word.
     wordsOf s = [(i, stem w) | (i, Word (BS.map toLower->w)) <- zip [0..] (filter isWord s)
@@ -87,7 +76,7 @@ topicTiling w model text = let
     -- Passing the True flag to infer enables returning the most common assignment, rather than the last.
     infer :: IO [Int]
     infer = map snd . concat . LDA.topic_assignments <$>
-        LDA.infer num_iter True (lda model) [map snd ws | ws <- sentenceWords]
+        LDA.infer num_iter True model [map snd ws | ws <- sentenceWords]
     -- wordTopics is the final assignment of a topic to each word in sequence.
     -- This does not include the removed stop words.
     wordTopics0 :: [Int]
@@ -150,7 +139,7 @@ topicTiling w model text = let
     masses
 
 -- | Execute sentence-wise inference, then calculate similarity between sentences by comparing their topic distributions.
-sentence_docsim :: Model -> [Token] -> [SentenceMass]
+sentence_docsim :: LDA.Model -> [Token] -> [SentenceMass]
 sentence_docsim model text = let
     num_iter = 100
     -- Lowercase, remove stop words, but keep
@@ -163,7 +152,7 @@ sentence_docsim model text = let
     -- TODO: try using mode method?
     infer :: IO [Vector Double]
     infer = map V.fromList . LDA.p_topic_document <$>
-        LDA.infer num_iter False (lda model) [map snd ws | ws <- sentenceWords]
+        LDA.infer num_iter False model [map snd ws | ws <- sentenceWords]
     -- Represent each sentence as a distribution over topics.
     sentences = map fixup $ unsafePerformIO infer
     -- Add a small probability to every topic and renormalize; klDivergence doesn't like zeroes.

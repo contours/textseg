@@ -64,7 +64,8 @@ main = do
             --("TextTilingNLTK", nltkTextTiling),
             ("TopicTiling", adapt (topicTiling 2 lda)),
             ("JS-divergence", adapt (sentence_docsim lda)),
-            ("DP baseline", adapt DP.baseline)
+            ("DP baseline", adapt DP.baseline),
+            ("DP-LDA", adapt (DP.lda lda))
             ] :: [(String, [Token] -> [SentenceMass])]
 
     forM_ testSet $ \(Annotated name toks (map (toSentenceMass toks)->refs)) -> do
