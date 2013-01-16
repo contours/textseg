@@ -118,7 +118,6 @@ downcastSegmentation ls1 us1 = go ls1 us1
 upcastSegmentation :: Integral a => [a] -> [a] -> [a]
 upcastSegmentation ls1 us1 = go 0 (roundMasses ls1 us1) us1
     where go n (0:ls) us = go n ls us
-          go n ls (0:us) = go n ls us
           go n (l:ls) (u:us) =
               case compare (l-u) 0 of
                    EQ -> n+1 : go 0 ls us
@@ -131,7 +130,7 @@ upcastSegmentation ls1 us1 = go 0 (roundMasses ls1 us1) us1
 roundMasses :: (Num a, Ord a) => [a] -> [a] -> [a]
 roundMasses ls us = indicesToMasses (roundIndices (massesToIndices ls) (massesToIndices us)) (sum us)
 
--- | Convert list of 1-based indices of segment beginnings to list of segment masses.
+-- | Convert list of 0-based indices of segment beginnings to list of segment masses.
 -- Requires the total mass as a parameter, to calculate the mass of the last segment.
 indicesToMasses :: Num a => [a] -> a -> [a]
 indicesToMasses is total = zipWith (-) (is++[total]) (0:is++[total])
