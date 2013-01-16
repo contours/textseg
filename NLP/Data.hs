@@ -1,4 +1,7 @@
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE ViewPatterns #-}
+{-# LANGUAGE StandaloneDeriving #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
 module NLP.Data
     ( Segmentation
     , Document
@@ -11,11 +14,14 @@ module NLP.Data
     , galley2003_1
     , choi
 
+    , contours
+
     , stopWords
     ) where
 
+import qualified Data.ByteString.Lazy as BSL
 import qualified Data.ByteString.Char8 as BS 
---import           Data.ByteString.Char8 (ByteString)
+import           Data.ByteString.Char8 (ByteString)
 import Data.Attoparsec.ByteString.Char8
 import Control.Applicative
 import Data.List (transpose,group)
@@ -26,7 +32,10 @@ import System.IO.Unsafe (unsafePerformIO)
 import Control.Exception (assert)
 import System.Path.Glob (glob)
 import System.FilePath (combine)
-import qualified Data.HashMap.Strict as HM
+import qualified Data.Map as Map
+import Data.Aeson
+import Control.Monad
+import Data.List
 
 import NLP.Tokenizer
 import NLP.Segmentation
@@ -137,39 +146,53 @@ choi path = do
     return (zipWith3 Annotated names (map doc txts) (map seg txts))
 
 stopWords :: HashSet BS.ByteString
+stopWords = Set.empty
+{-
 stopWords = Set.unions
     -- Choi's stopwords list.
     [ Set.fromList $ BS.lines $ unsafePerformIO $ BS.readFile "data/choi_stopwords.list"
     -- Some additional suffixes.
     , Set.fromList ["'d","'re","'ve","'ll"]
     ]
+    -}
 
-{-
 data JsonRep t = JsonRep {
     -- TODO: add the type. assumed linear.
     jsItems :: [JsonDoc t]
     }
 
 data JsonDoc t = JsonDoc {
-    jsName :: String,
-    jsSegs :: [Segmentation t]
+    jsName :: ByteString,
+    jsSegs :: [JsonSeg t]
     }
 
-instance FromJSON (JsonRep t) where
+data JsonSeg t = JsonSeg {
+    jsCoder :: ByteString,
+    jsSeg :: Segmentation t
+    } deriving Show
+
+instance FromJSON t => FromJSON (JsonRep t) where
     parseJSON (Object v) = do
         hm <- v .: "items"
-        hm 
+        JsonRep <$> forM (Map.toList hm) doc
+        where doc (name, item) = JsonDoc <$> pure name <*> (mapM seg =<< return . Map.toList =<< parseJSON item)
+              seg (coder, item) = JsonSeg <$> pure coder <*> parseJSON item
 
-instance FromJSON (JsonDoc t) where
-    parseJSON (Object v
-
+deriving instance FromJSON CharacterMass
+deriving instance FromJSON WordMass
+deriving instance FromJSON SentenceMass
+deriving instance FromJSON ParagraphMass
 
 -- Assumes interview texts are strictly one-sentence-per-line, without speaker names, and with no further explicit tokenization.
 contours :: FilePath -> IO (Dataset SentenceMass)
 contours path = do
-    txtNames <- glob (combine path "*.txt")
-    repTxt <- BS.readFile (combine path "segmentations.json")
-    rep <- either fail return (JSON.eitherDecode repTxt)
+    repTxt <- BSL.readFile (combine path "segmentations.json")
+    JsonRep jss <- either fail return (eitherDecode repTxt) :: IO (JsonRep SentenceMass)
+    forM jss $ \(JsonDoc (BS.unpack->name) segs) -> do
+        let filename = case stripPrefix "interviews:" name of
+                Just base -> combine path base ++ ".txt"
+                Nothing -> error (printf "interview ID must start with \"interviews:\": %s" name)
+        txt <- BS.readFile filename
+        let doc = breakPunctuation $ breakContractions $ simpleTokenize txt
+        return (Annotated name doc [dropWhile (==0) s | JsonSeg _ s <- segs])
 
-
--}

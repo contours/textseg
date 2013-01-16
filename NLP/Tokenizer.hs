@@ -1,8 +1,10 @@
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE ViewPatterns #-}
 module NLP.Tokenizer
     ( tokenize
     , simpleTokenize
-    , breakApostrophes
+    , breakContractions
+    , breakPunctuation
     , Token(..)
     , tokenText
     , splitAtParagraphs
@@ -21,9 +23,11 @@ import qualified Data.ByteString.Char8 as BS
 import           Data.ByteString.Char8 (ByteString)
 import Data.Attoparsec.ByteString.Char8 hiding (isSpace,take)
 import Data.Char (isSpace,isAlphaNum)
+import qualified Data.Char (isPunctuation)
 import Control.Applicative
 import Data.List
 import Data.Hashable (Hashable(..))
+import Text.Printf (printf)
 
 data Token
     = Word !ByteString
@@ -73,8 +77,8 @@ simpleTokenize = intercalate [SentenceBreak "\n"] . map sentence . BS.lines
                         else Punctuation txt
 
 -- | For compatibility. Finds words that end in "n't", "'m", "'s", or similar suffixes, and breaks that suffix off into a separate Word  token.
-breakApostrophes :: [Token] -> [Token]
-breakApostrophes = concatMap f
+breakContractions :: [Token] -> [Token]
+breakContractions = concatMap f
     where f (Word w) | isSuffix "n't" w = [Word (dropEnd 3 w), Word "n't"]
                      | isSuffix "'m"  w = [Word (dropEnd 2 w), Word "'m"]
                      | isSuffix "'s"  w = [Word (dropEnd 2 w), Word "'s"]
@@ -85,6 +89,22 @@ breakApostrophes = concatMap f
           f other = [other]
           isSuffix s xs = not (BS.null xs) && s == BS.drop (BS.length xs - BS.length s) xs
           dropEnd n xs = BS.take (BS.length xs - n) xs
+
+breakPunctuation :: [Token] -> [Token]
+breakPunctuation = concatMap f
+    where f (Word (BS.unpack->w)) =
+              case span punct w of
+                   ([], w2) -> g w2
+                   (w1, []) -> [Punctuation (BS.pack w1)]
+                   (w1, w2) -> Punctuation (BS.pack w1) : g w2
+          f other = [other]
+          g w =
+              case break punct w of
+                   (w1, []) -> [Word (BS.pack w1)]
+                   ([], w2) -> error (printf "breakPunctuation.g: %s" w)
+                   (w1, w2) -> [Word (BS.pack w1), Punctuation (BS.pack w2)]
+
+          punct c = Data.Char.isPunctuation c || c == '`'
 
 -- For now, simply looks for isolated period characters, question marks, and exclamation marks.
 -- Ellipses ("...") may cause false negatives and abbreviations ("U.S.") will cause false positives.

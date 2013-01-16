@@ -135,7 +135,7 @@ topicTiling w model text = let
         printf "# TopicTiling {'threshold': %.4f, 'score': %s, 'w': %d, 'predicted': %s}\n" threshold (show (V.toList gapScores)) w (show (map toInteger masses))
         return ()
     in
-    showDebugInfo `seq`
+    --showDebugInfo `seq`
     masses
 
 -- | Execute sentence-wise inference, then calculate similarity between sentences by comparing their topic distributions.

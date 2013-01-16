@@ -19,7 +19,7 @@ import NLP.Segmentation.NLTK
 import qualified NLP.Segmentation.DP as DP
 import NLP.SegEval
 import qualified NLP.Data
-import           NLP.Data (Annotated(..),Dataset)
+import           NLP.Data (Annotated(..),Dataset,Segmentation)
 import Util
 
 -- | Return the mean of the agreement drops (relative to the agreement between reference annotators) when each of the reference annotators is replaced by the one being tested in turn.
@@ -34,10 +34,13 @@ main = do
 
     --ds <- NLP.Data.stargazer_hearst_1997 "data/stargazer_hearst_1997/article.txt"
     --ds <- NLP.Data.moonstone "data/moonstone_corpus"
-    ds <- NLP.Data.choi "/srv/data/choi/1/3-11"
+    --ds <- NLP.Data.choi "/srv/data/choi/1/3-11"
+    ds <- NLP.Data.contours "/srv/data/u-series"
 
-    let trainSet = removeIndex 10 ds
-    let testSet = [ds !! 10]
+    --let trainSet = removeIndex 10 ds
+    --let testSet = [ds !! 10]
+    let trainSet = []
+    let testSet = ds
 
     printf "Training set contains %d documents.\n" (length trainSet)
     putStrLn "Test set info:"
@@ -59,13 +62,13 @@ main = do
             return lda
 
     let adapt f toks = fromLinearMass toks (f toks)
-    let methods = [
-            ("TextTiling", adapt textTiling),
-            --("TextTilingNLTK", nltkTextTiling),
-            ("TopicTiling", adapt (topicTiling 2 lda)),
-            ("JS-divergence", adapt (sentence_docsim lda)),
-            ("DP baseline", adapt DP.baseline),
-            ("DP-LDA", adapt (DP.lda lda))
+    let methods = 
+            [ ("TextTiling", adapt textTiling)
+            --, ("TextTilingNLTK", nltkTextTiling)
+            , ("TopicTiling", adapt (topicTiling 2 lda))
+            --, ("JS-divergence", adapt (sentence_docsim lda))
+            , ("DP baseline", adapt DP.baseline)
+            --, ("DP-LDA", adapt (DP.lda lda))
             ] :: [(String, [Token] -> [SentenceMass])]
 
     forM_ testSet $ \(Annotated name toks (map (toSentenceMass toks)->refs)) -> do
@@ -76,9 +79,14 @@ main = do
         printf "Reference:      %s\n" (prn ref)
         forM_ methods $ \(name, segment) -> do
             let s = segment toks
-            printf "Segments of %s:\t%s\n"   name (prn s)
-            printf "Mean Pk for %s:\t%.4f\n" name (mean (map (pk s) refs) :: Double)
-            printf "Mean S  for %s:\t%.4f\n" name (mean (map (similarity s) refs) :: Double)
+            printf "-- %s\n" name
+            printf "Segments      :\t%s\n"   (prn s)
+            printf "Mean Pk       :\t%.4f\n" (mean (map (pk s) refs) :: Double)
+            printf "Mean S        :\t%.4f\n" (mean (map (similarity s) refs) :: Double)
+            printf "Agreement drop:\t%.4f\n" (agreementDrop s refs)
+
+agreementDrop :: Integral t => Segmentation t -> [Segmentation t] -> Double
+agreementDrop hyp refs = agreement_fleiss_kappa refs - agreement_fleiss_kappa (hyp:refs)
 
 showDatasetInfo :: [Annotated a] -> IO ()
 showDatasetInfo ds = do

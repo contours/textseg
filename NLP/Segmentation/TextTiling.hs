@@ -104,7 +104,8 @@ textTiling text = let
                   -- convert boundary indices to a list of word masses
                   _ -> map WordMass $ zipWith (-) (boundaries++[totalWordMass]) (0:boundaries++[totalWordMass])
     in
-    showDebugInfo `seq` masses
+    --showDebugInfo `seq`
+    masses
     {-
     if length psentences < 2
        -- Text is too short. Return one segment.

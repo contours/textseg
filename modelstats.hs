@@ -12,6 +12,7 @@ import qualified Data.Map as Map
 import Data.Map (Map)
 import Data.Ord
 import Data.Tuple
+import System.Environment (getArgs)
 
 import NLP.Tokenizer
 import NLP.Segmentation
@@ -26,7 +27,8 @@ import Util
 import NLP.LDA
 
 main = do
-    lda <- decodeFile "/srv/data/interviews.model"
+    [filename] <- getArgs
+    lda <- decodeFile filename
     let wm = parseWordMap lda
     let rwm = invertMap wm
     let topic_weights = map sum (transpose (p_topic_document lda))

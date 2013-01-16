@@ -26,7 +26,7 @@ import Util
 main = do
     filenames <- glob "/srv/data/U. The*/*/*"
     texts <- mapM BS.readFile filenames
-    let lda = trainLDA (map (dropSpeakerNames . breakApostrophes . map newlineToSentenceBreak . tokenize) texts)
+    let lda = trainLDA (map (dropSpeakerNames . map newlineToSentenceBreak . tokenize) texts)
     encodeFile "/srv/data/interviews.model" lda
 
 newlineToSentenceBreak (Whitespace "\n") = SentenceBreak "\n"

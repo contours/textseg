@@ -1,24 +1,26 @@
 -- Dynamic Programming based methods.
 module NLP.Segmentation.DP
     ( baseline
-    , lda
+--    , lda
     ) where
 
 import Data.Array
-import Data.Graph.Inductive
 import Data.List (nub)
 import qualified Data.Map as Map
 import           Data.ByteString.Char8 (ByteString)
 import qualified Data.ByteString.Char8 as BS
 import Data.Char (toLower)
-import qualified Data.HashSet as Set
+import qualified Data.HashSet as HashSet
+import qualified Data.Set as Set
 import System.IO.Unsafe (unsafePerformIO)
+import Control.Monad
 
 import NLP.Tokenizer
 import NLP.Segmentation
 import qualified NLP.Stemmer
 import NLP.Data (stopWords)
 import qualified NLP.LDA as LDA
+import SkewHeap as PQ
 
 import Debug.Trace
 
@@ -27,7 +29,7 @@ stem = BS.pack . NLP.Stemmer.stem NLP.Stemmer.English . map toLower . BS.unpack
 -- | Stem, lowercase, and split into sentences.
 preprocess :: [Token] -> [[ByteString]]
 preprocess toks = map (map (stem . BS.map toLower . tokenText) . filter ok) (splitAtSentences toks)
-    where ok w = isWord w && not (Set.member (BS.map toLower (tokenText w)) stopWords)
+    where ok w = isWord w && not (HashSet.member (BS.map toLower (tokenText w)) stopWords)
 
 baseline :: [Token] -> [SentenceMass]
 baseline toks = let
@@ -48,16 +50,6 @@ baseline' sentences = let
     -- frequency(w,i) is the number of times word w occurs in sentence i
     frequency w i = length (filter (==w) (sentences!!i))
 
-    -- Construct a graph representing all possible segmentations.
-    graph = mkGraph
-        -- nodes are positions between sentences ("fenceposts"), with node 0 and node n bookending the document
-        [(i, ()) | i <- [0..n]]
-        -- edges represent possible segments, spanning at least one sentence
-        [(i,j,cost i j) |
-            i <- [0..n],
-            j <- [i+1..n]]
-        :: Gr () Double
-
     -- cum(w,i) is the number of times word w appears before sentence-gap i
     -- memoized by an array
     cums = array ((0,0),(n,m)) $
@@ -75,11 +67,13 @@ baseline' sentences = let
         | k <- [0..m-1]]
 
     -- The minimum-cost path from 0 to n is the highest-probability segmentation.
-    path = sp 0 n graph
+    succ i = [(cost i j, j) | j <- [i+1..n]]
+    Just path = dijkstra succ (== n) 0
 
     in
     map SentenceMass $ indicesToMasses (tail (init path)) n
 
+{-
 lda :: LDA.Model -> [Token] -> [SentenceMass]
 lda model toks = let
     sentences = preprocess toks
@@ -94,7 +88,8 @@ lda model toks = let
             j <- [i+1..n]]
         :: Gr () Double
 
-    ll i j = unsafePerformIO $ LDA.logLikelihood 20 model $ concat (take (j-i) (drop i sentences))
+    numIterations = 20
+    ll i j = unsafePerformIO $ LDA.logLikelihood numIterations model $ concat (take (j-i) (drop i sentences))
     -- basic log-likelihood plus the prior/penalty term
     cost i j = - ll i j + 3.0 * log (fromIntegral totalLength)
 
@@ -103,4 +98,32 @@ lda model toks = let
     in
     --graph `traceShow`
     map SentenceMass $ indicesToMasses (tail (init path)) n
+    -}
+
+-- | A* search. You must provide a state successor function (which also provides the cost to reach each state), a function which identifies goal states, an admissible heuristic, and the initial state. Good monads to use in the result are Maybe (to calculate only the first optimal solution) and List (to calculate all optimal solutions, to all possible goal states).
+-- States must be orderable because this algorithm maintains a closed set of visited states.
+-- For the same reason, the cost-so-far-plus-heuristic function must be monotonic.
+aStarSearch :: (Ord s, MonadPlus m) => (s -> Double) -> (s -> [(Double,s)]) -> (s -> Bool) -> s -> m [s]
+aStarSearch heuristic succ isGoal start =
+    go Set.empty (PQ.singleton (0 + heuristic start) (0, start, []))
+    where go _ queue | PQ.null queue = mzero
+          go visited queue = let
+              (cost, state, path) = PQ.minValue queue
+              visited' = Set.insert state visited
+              queue' = PQ.deleteMin queue
+              -- When a state is enqueued, its key becomes the cost-so-far, plus the cost to transition to that state, plus the estimate of that state's distance from the goal.
+              -- Its value is the new cost-so-far, the state itself, and the path taken to get to it.
+              enqueueState q (c,s) = PQ.insert (cost + c + heuristic s) (cost + c, s, state:path) q
+              queue'' = foldl enqueueState queue' (succ state)
+              in
+              if Set.member state visited then
+                  go visited queue'
+              else if isGoal state then
+                  (return $ reverse (state:path)) `mplus`
+                  go visited' queue''
+              else
+                  go visited' queue''
+
+-- Dijkstra's algorithm is A* search with a constant heuristic.
+dijkstra = aStarSearch (const 0)
 
