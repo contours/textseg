@@ -1,7 +1,8 @@
 -- Dynamic Programming based methods.
+{-# LANGUAGE FlexibleContexts #-}
 module NLP.Segmentation.DP
     ( baseline
---    , lda
+    , lda
     ) where
 
 import Data.Array
@@ -14,13 +15,16 @@ import qualified Data.HashSet as HashSet
 import qualified Data.Set as Set
 import System.IO.Unsafe (unsafePerformIO)
 import Control.Monad
+import Control.Monad.ST
+import Data.Array.ST
+import Data.STRef
+import Control.Applicative
 
 import NLP.Tokenizer
 import NLP.Segmentation
 import qualified NLP.Stemmer
 import NLP.Data (stopWords)
 import qualified NLP.LDA as LDA
-import SkewHeap as PQ
 
 import Debug.Trace
 
@@ -67,13 +71,11 @@ baseline' sentences = let
         | k <- [0..m-1]]
 
     -- The minimum-cost path from 0 to n is the highest-probability segmentation.
-    succ i = [(cost i j, j) | j <- [i+1..n]]
-    Just path = dijkstra succ (== n) 0
+    path = dp cost 0 n
 
     in
     map SentenceMass $ indicesToMasses (tail (init path)) n
 
-{-
 lda :: LDA.Model -> [Token] -> [SentenceMass]
 lda model toks = let
     sentences = preprocess toks
@@ -81,49 +83,85 @@ lda model toks = let
     m = length (nub (concat sentences))
     totalLength = sum (map length sentences) :: Int
 
-    graph = mkGraph
-        [(i, ()) | i <- [0..n]]
-        [(i,j,cost i j) |
-            i <- [0..n],
-            j <- [i+1..n]]
-        :: Gr () Double
-
     numIterations = 20
     ll i j = unsafePerformIO $ LDA.logLikelihood numIterations model $ concat (take (j-i) (drop i sentences))
     -- basic log-likelihood plus the prior/penalty term
     cost i j = - ll i j + 3.0 * log (fromIntegral totalLength)
 
-    path = sp 0 n graph
+    --path = modifiedDP cost 0 n
+    path = modifiedDP (\i j -> let c = cost i j in (i,j,c)`traceShow`c) 0 n
 
     in
     --graph `traceShow`
     map SentenceMass $ indicesToMasses (tail (init path)) n
-    -}
 
--- | A* search. You must provide a state successor function (which also provides the cost to reach each state), a function which identifies goal states, an admissible heuristic, and the initial state. Good monads to use in the result are Maybe (to calculate only the first optimal solution) and List (to calculate all optimal solutions, to all possible goal states).
--- States must be orderable because this algorithm maintains a closed set of visited states.
--- For the same reason, the cost-so-far-plus-heuristic function must be monotonic.
-aStarSearch :: (Ord s, MonadPlus m) => (s -> Double) -> (s -> [(Double,s)]) -> (s -> Bool) -> s -> m [s]
-aStarSearch heuristic succ isGoal start =
-    go Set.empty (PQ.singleton (0 + heuristic start) (0, start, []))
-    where go _ queue | PQ.null queue = mzero
-          go visited queue = let
-              (cost, state, path) = PQ.minValue queue
-              visited' = Set.insert state visited
-              queue' = PQ.deleteMin queue
-              -- When a state is enqueued, its key becomes the cost-so-far, plus the cost to transition to that state, plus the estimate of that state's distance from the goal.
-              -- Its value is the new cost-so-far, the state itself, and the path taken to get to it.
-              enqueueState q (c,s) = PQ.insert (cost + c + heuristic s) (cost + c, s, state:path) q
-              queue'' = foldl enqueueState queue' (succ state)
-              in
-              if Set.member state visited then
-                  go visited queue'
-              else if isGoal state then
-                  (return $ reverse (state:path)) `mplus`
-                  go visited' queue''
-              else
-                  go visited' queue''
+-- | Basic dynamic programming algorithm for segmentation.
+-- Requires a cost function and the start and end node IDs.
+-- Equivalent to Dijkstra's algorithm.
+dp :: (Int -> Int -> Double) -> Int -> Int -> [Int]
+-- Hey, Haskell can do imperative programming, too!
+dp cost start end = runST $ do
+    let infinity = (1/0) :: Double
+    minCosts <- newSTUArray (start,end) infinity
+    writeArray minCosts start 0
+    bp <- newSTUArray (start,end) (-1)
+    -- forward pass
+    forM_ [start..end] $ \i -> do
+        forM_ [i+1..end] $ \j -> do
+            ci <- readArray minCosts i
+            cj <- readArray minCosts j
+            let cj' = ci + cost i j
+            when (cj' < cj) $ do
+                writeArray minCosts j cj'
+                writeArray bp j i
+    -- backward pass
+    path <- newSTRef [end]
+    let trace j = do
+        i <- readArray bp j
+        modifySTRef' path (i:)
+        when (i /= start) (trace i)
+    trace end
+    readSTRef path
 
--- Dijkstra's algorithm is A* search with a constant heuristic.
-dijkstra = aStarSearch (const 0)
+-- | Misra's modification to the DP algorithm for segmentation.
+modifiedDP :: (Int -> Int -> Double) -> Int -> Int -> [Int]
+modifiedDP cost start end = runST $ do
+    let infinity = (1/0) :: Double
+    minCosts <- newSTUArray (start,end) infinity
+    writeArray minCosts start 0
+    bp <- newSTUArray (start,end) (-1)
+    -- Keep a count of the number of times a node was "active".
+    -- A node is active if it is found to be the best starting point of a segment.
+    activity <- newSTUArray (start,end) (0 :: Int)
+    lastActiveNode <- newSTRef start
+    -- forward pass
+    forM_ [start..end] $ \j -> do
+        -- Skip begin nodes which are before the last active node.
+        active <- readSTRef lastActiveNode
+        forM_ [active..j-1] $ \i -> do
+            when (i >= active) $ do
+                ci <- readArray minCosts i
+                cj <- readArray minCosts j
+                let cj' = ci + cost i j
+                when (cj' < cj) $ do
+                    writeArray minCosts j cj'
+                    writeArray bp j i
+                    -- Node i is active.
+                    count <- readArray activity i
+                    writeArray activity i (count+1)
+                    -- A node is only considered active "for reals" when
+                    -- it is active at least twice. For robustness, apparently.
+                    when (count >= 1) (writeSTRef lastActiveNode i)
+    -- backward pass
+    path <- newSTRef [end]
+    let trace j = do
+        i <- readArray bp j
+        modifySTRef' path (i:)
+        when (i /= start) (trace i)
+    trace end
+    readSTRef path
+
+-- A convenient type annotation, specializing newArray to the actual implementation (ST-Unboxed) we use.
+newSTUArray :: (MArray (STUArray s) e (ST s), Ix i) => (i, i) -> e -> ST s (STUArray s i e)
+newSTUArray = newArray
 

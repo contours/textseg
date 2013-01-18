@@ -134,7 +134,6 @@ logLikelihood num_iterations model0 doc = do
         doc' = map (\w -> Map.findWithDefault (-1) w (parseWordMap model)) doc
         count v = fromIntegral (length (filter (==v) doc'))
         ll = sum [count v * log (sum [(theta!!t) * (phi!!t!!v) | t <- [0..num_topics-1]]) | v <- [0..num_words-1]]
-    print ll
     return ll
 
 parseWordMap :: Model -> Map Word Int

@@ -40,7 +40,7 @@ main = do
     --let trainSet = removeIndex 10 ds
     --let testSet = [ds !! 10]
     let trainSet = []
-    let testSet = ds
+    let testSet = [ds !! 22]
 
     printf "Training set contains %d documents.\n" (length trainSet)
     putStrLn "Test set info:"
@@ -64,11 +64,11 @@ main = do
     let adapt f toks = fromLinearMass toks (f toks)
     let methods = 
             [ ("TextTiling", adapt textTiling)
-            --, ("TextTilingNLTK", nltkTextTiling)
-            , ("TopicTiling", adapt (topicTiling 2 lda))
-            --, ("JS-divergence", adapt (sentence_docsim lda))
             , ("DP baseline", adapt DP.baseline)
-            --, ("DP-LDA", adapt (DP.lda lda))
+            , ("DP-LDA", adapt (DP.lda lda))
+            --, ("TextTilingNLTK", nltkTextTiling)
+            , ("TopicTiling", adapt (topicTiling 6 lda))
+            --, ("JS-divergence", adapt (sentence_docsim lda))
             ] :: [(String, [Token] -> [SentenceMass])]
 
     forM_ testSet $ \(Annotated name toks (map (toSentenceMass toks)->refs)) -> do
@@ -76,7 +76,7 @@ main = do
         let ref = head refs
         let prn = show . map toInteger
         printf "------------- %s\n" name
-        printf "Reference:      %s\n" (prn ref)
+        forM_ refs (printf "Reference:      %s\n" . prn)
         forM_ methods $ \(name, segment) -> do
             let s = segment toks
             printf "-- %s\n" name

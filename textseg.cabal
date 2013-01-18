@@ -14,7 +14,7 @@ cabal-version:       >=1.8
 
 executable test
   main-is:             Main.hs
-  ghc-options:         -W -O
+  ghc-options:         -W -O2
   -- other-modules:       
   build-depends:       base ==4.6.*,
                        hashable ==1.1.*,
