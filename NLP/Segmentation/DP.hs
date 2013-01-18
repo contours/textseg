@@ -92,12 +92,10 @@ lda model toks = let
     path = modifiedDP (\i j -> let c = cost i j in (i,j,c)`traceShow`c) 0 n
 
     in
-    --graph `traceShow`
     map SentenceMass $ indicesToMasses (tail (init path)) n
 
 -- | Basic dynamic programming algorithm for segmentation.
 -- Requires a cost function and the start and end node IDs.
--- Equivalent to Dijkstra's algorithm.
 dp :: (Int -> Int -> Double) -> Int -> Int -> [Int]
 -- Hey, Haskell can do imperative programming, too!
 dp cost start end = runST $ do

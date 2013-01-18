@@ -16,6 +16,7 @@ import Data.Binary hiding (Word)
 import           Data.Map (Map)
 import qualified Data.Map as Map
 import Data.List
+import Data.Array.Unboxed
 
 import Debug.Trace
 
@@ -23,7 +24,9 @@ type Word = ByteString
 
 data Model = Model {
     others :: ByteString,
-    phi :: ByteString,
+    -- | The word-topic distributions; a num_topics by num_words matrix.
+    p_word_topic :: UArray (Int,Int) Double,
+    unparsed_p_word_topic :: ByteString,
     theta :: ByteString,
     tassign :: ByteString,
     --twords :: ByteString,
@@ -31,8 +34,26 @@ data Model = Model {
     }
 
 instance Binary Model where
-    get = Model <$> get <*> get <*> get <*> get <*> get
-    put (Model a b c d e) = mapM_ put [a,b,c,d,e]
+    get = do
+        others <- get
+        unparsed_p_word_topic <- get
+        theta <- get
+        tassign <- get
+        wordmap <- get
+        return $! Model {
+            others = others,
+            p_word_topic = parse_array unparsed_p_word_topic,
+            unparsed_p_word_topic = unparsed_p_word_topic,
+            theta = theta,
+            tassign = tassign,
+            wordmap = wordmap
+            }
+    put model = do
+        put (others model)
+        put (unparsed_p_word_topic model)
+        put (theta model)
+        put (tassign model)
+        put (wordmap model)
 
 tmpdir_prefix = "/tmp/lda-" :: String
 path_to_lda = "" :: String
@@ -50,9 +71,11 @@ train alpha beta num_topics num_iterations docs =
         case errno of { ExitFailure e -> fail (printf "lda failed with exit code %d" e); _ -> return () }
         -- now read back the model info
         let prefix = tmpdir++"/model-final." 
+        u_pwt <- BS.readFile (prefix++"phi")
         model <- Model <$>
             BS.readFile (prefix++"others") <*>
-            BS.readFile (prefix++"phi") <*>
+            pure (parse_array u_pwt) <*>
+            pure u_pwt <*>
             BS.readFile (prefix++"theta") <*>
             BS.readFile (prefix++"tassign") <*>
             --BS.readFile (prefix++"twords") <*>
@@ -70,7 +93,7 @@ infer num_iterations mode_method model docs =
         -- write model
         let prefix = tmpdir++"/"++modelname++"."
         BS.writeFile (prefix++"others")  (others model)
-        BS.writeFile (prefix++"phi")     (phi model)
+        BS.writeFile (prefix++"phi")     (unparsed_p_word_topic model)
         BS.writeFile (prefix++"theta")   (theta model)
         BS.writeFile (prefix++"tassign") (tassign model)
         --BS.writeFile (prefix++"twords")  (twords model)
@@ -81,9 +104,11 @@ infer num_iterations mode_method model docs =
         case errno of { ExitFailure e -> fail (printf "lda failed with exit code %d" e); _ -> return () }
         -- read inferences
         let prefix = tmpdir++"/"++inputname++"."
+        u_pwt <- BS.readFile (prefix++"phi")
         inference <- Model <$>
             BS.readFile (prefix++"others") <*>
-            BS.readFile (prefix++"phi") <*>
+            pure (parse_array u_pwt) <*>
+            pure u_pwt <*>
             BS.readFile (prefix++"theta") <*>
             BS.readFile (prefix++"tassign") <*>
             --BS.readFile (prefix++"twords") <*>
@@ -114,26 +139,28 @@ p_topic_document model = case parseOnly documents (theta model) of
           document = p `sepBy` string " "
           p = rational
 
--- | The word-topic distributions; a num_topics by num_words matrix.
-p_word_topic :: Model -> [[Double]]
-p_word_topic model = case parseOnly topics (phi model) of
-                          Left err -> error err
-                          Right ps -> dropWhileEnd null ps
+parse_array :: ByteString -> UArray (Int,Int) Double
+parse_array str = case parseOnly topics str of
+                       Left err -> error err
+                       Right ps -> listArray ((1,1),(length (dropWhileEnd null ps), length (head ps))) (concat ps)
     where topics = topic `sepBy` string " \n"
           topic = p `sepBy` string " "
           p = rational
+
+-- rather slow
+--unparse_array :: UArray (Int,Int) Double -> ByteString
+--unparse_array arr = BS.unlines [BS.unwords [BS.pack (show (arr!(i,j))) | j <- [1..fst (snd (bounds arr))]] | i <- [1..snd (snd (bounds arr))]]
 
 -- | Compute the log-likelihood of a new document.
 logLikelihood :: Int -> Model -> [Word] -> IO Double
 logLikelihood num_iterations model0 doc = do
     model <- infer num_iterations False model0 [doc]
     let [theta] = p_topic_document model
-        phi = p_word_topic model
+        phi = p_word_topic model0
         num_topics = length theta
-        num_words = length (head phi)
         doc' = map (\w -> Map.findWithDefault (-1) w (parseWordMap model)) doc
         count v = fromIntegral (length (filter (==v) doc'))
-        ll = sum [count v * log (sum [(theta!!t) * (phi!!t!!v) | t <- [0..num_topics-1]]) | v <- [0..num_words-1]]
+        ll = sum [count v * log (sum [(theta!!t) * (phi!(t+1,v+1)) | t <- [0..num_topics-1]]) | v <- delete (-1) (nub doc')]
     return ll
 
 parseWordMap :: Model -> Map Word Int

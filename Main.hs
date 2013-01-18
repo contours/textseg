@@ -64,10 +64,10 @@ main = do
     let adapt f toks = fromLinearMass toks (f toks)
     let methods = 
             [ ("TextTiling", adapt textTiling)
+            , ("TopicTiling", adapt (topicTiling 6 lda))
             , ("DP baseline", adapt DP.baseline)
             , ("DP-LDA", adapt (DP.lda lda))
             --, ("TextTilingNLTK", nltkTextTiling)
-            , ("TopicTiling", adapt (topicTiling 6 lda))
             --, ("JS-divergence", adapt (sentence_docsim lda))
             ] :: [(String, [Token] -> [SentenceMass])]
 
