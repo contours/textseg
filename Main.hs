@@ -10,6 +10,8 @@ import Python.Interpreter (py_initialize)
 import System.Directory (doesFileExist)
 import Data.Binary
 import System.Environment (getArgs)
+import Data.Ord
+import Data.List
 
 import NLP.Tokenizer
 import NLP.Segmentation
@@ -19,14 +21,8 @@ import NLP.Segmentation.NLTK
 import qualified NLP.Segmentation.DP as DP
 import NLP.SegEval
 import qualified NLP.Data
-import           NLP.Data (Annotated(..),Dataset,Segmentation)
+import           NLP.Data (Annotated(..),Dataset,NamedSegmentation(..),Segmentation)
 import Util
-
--- | Return the mean of the agreement drops (relative to the agreement between reference annotators) when each of the reference annotators is replaced by the one being tested in turn.
--- This requires at least two reference annotations.
-agreement_drop :: Integral a => [[a]] -> [a] -> Double
-agreement_drop refs x = mean (map (agreement_fleiss_kappa refs -) agreements)
-    where agreements = map (agreement_fleiss_kappa.(x:).tail) (cycles refs)
 
 main = do
     py_initialize
@@ -35,12 +31,30 @@ main = do
     --ds <- NLP.Data.stargazer_hearst_1997 "data/stargazer_hearst_1997/article.txt"
     --ds <- NLP.Data.moonstone "data/moonstone_corpus"
     --ds <- NLP.Data.choi "/srv/data/choi/1/3-11"
-    ds <- NLP.Data.contours "/srv/data/u-series"
+    ds_contours <- NLP.Data.contours "/srv/data/u-series"
+    ds_docsouth <- NLP.Data.contours "/srv/data/docsouth"
+
+    let ds_contours_norybesh = map (\d -> d {
+            segmentation = filter (\s -> segname s /= "annotators:rybesh") (segmentation d)}) ds_contours
+
+    let ds_merged = zipWith (\d1 d2 -> Annotated {
+            name = name d1,
+            document = document d1,
+            segmentation = segmentation d1 ++ segmentation d2 })
+            (sortBy (comparing name) (filter (\d -> name d `elem` map name ds_contours_norybesh) ds_docsouth))
+            (sortBy (comparing name) ds_contours_norybesh)
+
+    putStrLn "**** Contours"
+    showDatasetInfo ds_contours_norybesh
+    putStrLn "**** Docsouth"
+    --showDatasetInfo ds_docsouth
+    putStrLn "**** Contours+Docsouth"
+    showDatasetInfo ds_merged
 
     --let trainSet = removeIndex 10 ds
     --let testSet = [ds !! 10]
     let trainSet = []
-    let testSet = [ds !! 22]
+    let testSet = [ds_contours !! 22]
 
     printf "Training set contains %d documents.\n" (length trainSet)
     putStrLn "Test set info:"
@@ -71,7 +85,8 @@ main = do
             --, ("JS-divergence", adapt (sentence_docsim lda))
             ] :: [(String, [Token] -> [SentenceMass])]
 
-    forM_ testSet $ \(Annotated name toks (map (toSentenceMass toks)->refs)) -> do
+    forM_ testSet $ \(Annotated name toks refsegs) -> do
+        let refs = map (\(NamedSegmentation _ s) -> toSentenceMass toks s) refsegs
         let txt = BS.concat (map tokenText toks)
         let ref = head refs
         let prn = show . map toInteger
@@ -83,14 +98,17 @@ main = do
             printf "Segments      :\t%s\n"   (prn s)
             printf "Mean Pk       :\t%.4f\n" (mean (map (pk s) refs) :: Double)
             printf "Mean S        :\t%.4f\n" (mean (map (similarity s) refs) :: Double)
-            printf "Agreement drop:\t%.4f\n" (agreementDrop s refs)
+            --printf "Agreement drop:\t%.4f\n" (agreementDrop [s] [refs])
 
-agreementDrop :: Integral t => Segmentation t -> [Segmentation t] -> Double
-agreementDrop hyp refs = agreement_fleiss_kappa refs - agreement_fleiss_kappa (hyp:refs)
+--agreementDrop :: Integral t => [Segmentation t] -> [[Segmentation t]] -> Double
+--agreementDrop hyp refs = agreement_fleiss_kappa refs - agreement_fleiss_kappa (hyp:refs)
 
-showDatasetInfo :: [Annotated a] -> IO ()
+showDatasetInfo :: Integral a => [Annotated a] -> IO ()
 showDatasetInfo ds = do
     printf "Dataset contains %d document(s): \n" (length ds)
+    printf "Overall Multi-Pi agreement: %f\n" (agreement_fleiss_pi [map segseg segs | Annotated _ _ segs <- ds])
+    printf "Overall Multi-K  agreement: %f\n" (agreement_fleiss_kappa [map segseg segs | Annotated _ _ segs <- ds])
+    printf "Overall Artstein-Poesio bias: %f\n" (artstein_poesio_bias [map segseg segs | Annotated _ _ segs <- ds])
     forM_ ds $ \(Annotated name toks segs) -> do
         printf "%s: %d paragraphs, %d sentences, %d words; %d refs (mean segment count %.1f)\n"
             name
@@ -98,7 +116,13 @@ showDatasetInfo ds = do
             (fromIntegral $ totalSentenceMass toks :: Int)
             (fromIntegral $ totalWordMass toks :: Int)
             (length segs)
-            (mean (map length segs) :: Double)
+            (mean (map (\(NamedSegmentation _ s)->length s) segs) :: Double)
+        forM_ segs $ \(NamedSegmentation name seg) -> do
+            printf "\t%s: %s\n" name (show (map toInteger seg))
+        when (length segs >= 2) $ do
+            printf "Multi-Pi agreement: %f\n" (agreement_fleiss_pi [map segseg segs])
+            printf "Multi-K  agreement: %f\n" (agreement_fleiss_kappa [map segseg segs])
+            printf "Artstein-Poesio bias: %f\n" (artstein_poesio_bias [map segseg segs])
 
 -- | k-fold cross validation.
 -- Randomly permuting the data set is up to the caller.

@@ -2,8 +2,10 @@
 {-# LANGUAGE ViewPatterns #-}
 {-# LANGUAGE StandaloneDeriving #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE ParallelListComp #-}
 module NLP.Data
     ( Segmentation
+    , NamedSegmentation(..)
     , Document
     , Annotated(..)
     , Dataset
@@ -43,25 +45,29 @@ import NLP.Segmentation
 --import Debug.Trace
 
 type Segmentation t = [t]
+data NamedSegmentation t = NamedSegmentation {
+    segname :: String,
+    segseg :: Segmentation t
+    } deriving Show
 type Document = [Token]
 type Dataset t = [Annotated t]
 data Annotated t = Annotated {
     name :: String,
     document :: Document,
-    segmentation :: [Segmentation t]
+    segmentation :: [NamedSegmentation t]
     }
 
 stargazer_hearst_1997 :: FilePath -> IO (Dataset ParagraphMass)
 stargazer_hearst_1997 articlePath = do
     txt <- BS.readFile articlePath
     let doc = tokenize txt
-    let refs = [ [2,3,3,1,3,6,3]
-               , [2,8,2,4,2,3]
-               , [2,1,2,3,1,3,1,3,2,2,1]
-               , [2,1,4,1,1,3,1,4,3,1]
-               , [3,2,4,3,5,4]
-               , [2,3,4,2,2,5,3]
-               , [2,3,2,2,3,1,3,2,3]] :: [[ParagraphMass]]
+    let refs = [ NamedSegmentation "1" [2,3,3,1,3,6,3]
+               , NamedSegmentation "2" [2,8,2,4,2,3]
+               , NamedSegmentation "3" [2,1,2,3,1,3,1,3,2,2,1]
+               , NamedSegmentation "4" [2,1,4,1,1,3,1,4,3,1]
+               , NamedSegmentation "5" [3,2,4,3,5,4]
+               , NamedSegmentation "6" [2,3,4,2,2,5,3]
+               , NamedSegmentation "7" [2,3,2,2,3,1,3,2,3]] :: [NamedSegmentation ParagraphMass]
     return [Annotated articlePath doc refs]
 
 moonstone :: FilePath -> IO (Dataset ParagraphMass)
@@ -73,7 +79,7 @@ moonstone path = do
     csvs <- mapM BS.readFile csvNames
     let docs = map tokenize txts
     let segs = map (\(csv,name) -> case parseOnly moonstone_segmentation csv of
-                                        Right seg -> seg
+                                        Right seg -> zipWith NamedSegmentation [name++show i|i<-[1..]] seg
                                         Left err -> error (printf "%s: %s" name err))
                    (zip csvs csvNames)
     return (zipWith3 Annotated txtNames docs segs)
@@ -132,7 +138,7 @@ galley2003_1 path subset count = do
                                          else error (printf "%s: not all segment boundaries correspond to newlines" name)
                                   Left err -> error (printf "%s: %s" name err)
     let masses = map (map CharacterMass) $ zipWith3 parse segs txts segNames
-    return (zipWith3 Annotated names docs (map (:[]) masses))
+    return (zipWith3 Annotated names docs [[NamedSegmentation (show i) ms] | ms <- masses | i <- [1..]])
 
 -- | Accepts a path containing *.ref files, such as "/home/you/data/choi/2/6-8"
 choi :: FilePath -> IO (Dataset SentenceMass)
@@ -142,8 +148,8 @@ choi path = do
     let f = splitAtToken (\t -> tokenText t == "==========") . simpleTokenize
     -- 'init' drops the extra trailing sentence break from each segment
     let doc = concat . map init . f
-    let seg = (:[]) . map (SentenceMass . length . drop 1 . filter isSentenceBreak) . f
-    return (zipWith3 Annotated names (map doc txts) (map seg txts))
+    let seg i txt = [NamedSegmentation (show i) (map (SentenceMass . length . drop 1 . filter isSentenceBreak) (f txt))]
+    return (zipWith3 Annotated names (map doc txts) (zipWith seg [1..] txts))
 
 stopWords :: HashSet BS.ByteString
 stopWords = Set.empty
@@ -168,7 +174,7 @@ data JsonDoc t = JsonDoc {
 
 data JsonSeg t = JsonSeg {
     jsCoder :: ByteString,
-    jsSeg :: Segmentation t
+    jsSeg :: [t]
     } deriving Show
 
 instance FromJSON t => FromJSON (JsonRep t) where
@@ -189,10 +195,11 @@ contours path = do
     repTxt <- BSL.readFile (combine path "segmentations.json")
     JsonRep jss <- either fail return (eitherDecode repTxt) :: IO (JsonRep SentenceMass)
     forM jss $ \(JsonDoc (BS.unpack->name) segs) -> do
-        let filename = case stripPrefix "interviews:" name of
-                Just base -> combine path base ++ ".txt"
-                Nothing -> error (printf "interview ID must start with \"interviews:\": %s" name)
+        let basename = maybe (error (printf "interview ID must start with \"interviews:\": %s" name))
+                             (id)
+                             (stripPrefix "interviews:" name)
+        let filename = combine path basename ++ ".txt"
         txt <- BS.readFile filename
         let doc = breakPunctuation $ breakContractions $ simpleTokenize txt
-        return (Annotated name doc [dropWhile (==0) s | JsonSeg _ s <- segs])
+        return (Annotated basename doc [NamedSegmentation (BS.unpack name) (dropWhile (==0) s) | JsonSeg name s <- segs])
 

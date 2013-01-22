@@ -36,7 +36,8 @@ main = do
     let top_topics = topIndices (length topic_weights) topic_weights
     printf "Top %d topic IDs: %s\n" (length top_topics) (show top_topics)
     forM_ top_topics $ \topic_id -> do
-        let top_word_ids = topIndices 20 (word_weights !! topic_id)
+        --let top_word_ids = topIndices 20 (word_weights !! topic_id)
+        let top_word_ids = error "FIXME: rewrite this line to work with the new array code"
         let top_words = map (rwm Map.!) top_word_ids
         printf "Top %d words for topic %d:\n" (length top_words) topic_id
         forM_ top_words (printf "\t%s\n" . BS.unpack)
