@@ -12,8 +12,10 @@ module NLP.SegEval
     , artstein_poesio_bias
     , pk
     , mean_pairwise
+    , mean_pairwise_permuted
     , windowdiff
     , windowdiff'
+    , compute_window_size
     ) where
 
 import Python.Interpreter
@@ -24,23 +26,25 @@ import System.IO.Unsafe
 import Data.Ratio
 import Data.List (genericLength)
 
--- | Uses the default parameter of n=2.
+-- | Uses the default parameter of n=2 and weight=(1,1)
 similarity :: Integral a => [a] -> [a] -> Double
-similarity = similarity' 2
+similarity = similarity' 2 (1.0,1.0)
 
 -- | Evaluate the S metric of segmentation similarity.
--- Parameters: n, segmentation A, segmentation B.
--- n is "the maximum number of PBs that boundaries can span to be considered transpositions".
+-- Parameters: n, weight, segmentation A, segmentation B.
+-- @n@ is "the maximum number of PBs that boundaries can span to be considered transpositions".
+-- @weight@ are the weights for substituation and transposition operations, respectively.
 -- Ref: Chris Fournier and Diana Inkpen. 2012. Segmentation Similarity and Agreement. Proceedings of Human Language Technologies: The 2012 Annual Conference of the North American Chapter of the Association for Computational Linguistics. (HLT ‘12). Association for Computational Linguistics.
-similarity' :: Integral a => a -> [a] -> [a] -> Double
-similarity' n a b = unsafePerformIO $ handlePy exc2ioerror $ do
+similarity' :: Integral a => a -> (Double,Double) -> [a] -> [a] -> Double
+similarity' n (w1,w2) a b = unsafePerformIO $ handlePy exc2ioerror $ do
     pyImport "segeval"
     pyImport "segeval.similarity"
     pyImport "segeval.similarity.SegmentationSimilarity"
     a' <- toPyObject (toCInts a)
     b' <- toPyObject (toCInts b)
     n' <- toPyObject (toCInt n)
-    dec <- callByName "segeval.similarity.SegmentationSimilarity.similarity" [a',b'] [("n",n')]
+    w' <- toPyObject [toCDouble w1,toCDouble w2]
+    dec <- callByName "segeval.similarity.SegmentationSimilarity.similarity" [a',b'] [("n",n'),("weight",w')]
     x <- callByName "float" [dec] [] >>= fromPyObject :: IO CDouble
     return (realToFrac x)
 
@@ -81,7 +85,13 @@ compute_window_size :: Integral a => [a] -> a
 compute_window_size masses = round (sum masses % (2 * genericLength masses))
 
 mean_pairwise :: Integral a => ([a] -> [a] -> Double) -> [[a]] -> Double
-mean_pairwise fn segs = mean [fn (segs!!a) (segs!!b) | a <- [0..length segs-1], b <- [0..length segs-1], a /= b]
+mean_pairwise fn segs = mean [fn (segs!!a) (segs!!b) | a <- [0..length segs-1], b <- [a+1..length segs-1]]
+    where mean xs = sum xs / fromIntegral (length xs)
+
+-- | Like mean_pairwise, but also includes the "flipped" evaluation of each pair: (b,a) as well as (a,b).
+-- For symmetric functions, there is no difference.
+mean_pairwise_permuted :: Integral a => ([a] -> [a] -> Double) -> [[a]] -> Double
+mean_pairwise_permuted fn segs = mean [fn (segs!!a) (segs!!b) | a <- [0..length segs-1], b <- [0..length segs-1], a /= b]
     where mean xs = sum xs / fromIntegral (length xs)
 
 massesToPositions :: Integral a => [a] -> [Int]
@@ -130,4 +140,7 @@ toCInts = map fromIntegral
 
 toCInt :: Integral a => a -> CInt
 toCInt = fromIntegral
+
+toCDouble :: Double -> CDouble
+toCDouble = realToFrac
 

@@ -49,21 +49,33 @@ load_ds_merged = do
 ex1 = do
     ds_merged <- load_ds_merged
 
-    let n_values = [1,2,3,5,8,16,32,48,64] :: [Int]
-    let s_header = intercalate "," [printf "S(n=%d)" n | n <- n_values]
-    printf "Document,Mean Segment Mass,WD Window Size,1 - Mean WD,%s\n" s_header
+    let (descs, funcs) = unzip
+            [("Total mass", \segs -> float (sum (head segs)))
+            ,("Mean seg count", \segs -> mean (map length segs) :: Double)
+            ,("Min seg mass", \segs -> float (minimum (concat segs)))
+            ,("Mean seg mass", \segs -> mean (concat segs) :: Double)
+            ,("Max seg mass", \segs -> float (maximum (concat segs)))
+            ,("1 - WD", \segs -> 1 - mean_pairwise_permuted (windowdiff' (compute_window_size (concat segs))) segs)
+            ,("1 - Pk", \segs -> 1 - mean_pairwise_permuted pk segs)
+            , s 1 (1,1)
+            , s 2 (1,1)
+            , s 3 (1,1)
+            , s 5 (1,1)
+            , s 1 (1,0)
+            , s 2 (1,0)
+            , s 3 (1,0)
+            , s 5 (1,0)
+            ]
+            where s n (w1,w2) = ( printf "S(n=%d;Ws=%.1f;Wt=%.1f)" (toInteger n) w1 w2
+                                , mean_pairwise (similarity' n (w1,w2)))
+                  float x = fromIntegral x :: Double
+    printf "\"Document\",%s\n" (intercalate "," (map (\d -> "\""++d++"\"") descs))
 
     forM_ ds_merged $ \(Annotated docname toks segmentations) -> do
         let all_segs = map segseg segmentations
-        let ([segseg->docsouth], map segseg->others) = partition (("annotators:docsouth"==).segname) segmentations
+        --let ([segseg->docsouth], map segseg->others) = partition (("annotators:docsouth"==).segname) segmentations
 
-        let mean_segment_mass = mean (concat all_segs) :: Double
-        let window_size = round (mean_segment_mass / 2.0) :: Int
-        let mean_wd = mean_pairwise (windowdiff' (fromIntegral window_size)) all_segs
-        let s_values = [mean_pairwise (similarity' n) all_segs | (fromIntegral->n) <- n_values]
-
-        printf "%s,%f,%d,%f,%s\n" docname mean_segment_mass window_size (1-mean_wd)
-                                  (intercalate "," (map show s_values))
+        printf "\"%s\",%s\n" docname (intercalate "," (map (show . ($ all_segs)) funcs))
 
 main = do
     py_initialize
