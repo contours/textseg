@@ -1,3 +1,7 @@
+##
+## Produces plots of the debug output of TopicTiling
+##
+
 import numpy
 import scipy
 import pylab

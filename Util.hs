@@ -1,3 +1,4 @@
+{-# LANGUAGE ScopedTypeVariables #-}
 module Util where
 
 mean :: (Real a, Fractional b) => [a] -> b
@@ -14,4 +15,22 @@ window width step xs = if length l >= width
 -- | Return all cyclic permutations of the input list. For example, @cycles [1,2,3] == [[1,2,3],[2,3,1],[3,1,2]]@.
 cycles :: [a] -> [[a]]
 cycles xs = take n (window n 1 (cycle xs)) where n = length xs
+
+-- | k-fold cross validation.
+-- Randomly permuting the data set is up to the caller.
+crossValidate :: forall sample model score.
+       Int
+    -> ([sample] -> model)
+    -> (model -> [sample] -> score)
+    -> [sample]
+    -> [score]
+-- (Requires language extension: ScopedTypeVariables)
+crossValidate k train test samples = map validate folds
+    where n = length samples
+          nk = div n k
+          subsamples :: [[sample]]
+          subsamples = take k (window nk nk samples)
+          folds :: [([sample],[sample])] -- [(validation,training)]
+          folds = map (splitAt nk . concat) (cycles subsamples)
+          validate (v,t) = test (train t) v
 

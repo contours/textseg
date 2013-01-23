@@ -1,17 +1,22 @@
-all: train modelstats docstats
+HSFLAGS = -O2 -threaded -rtsopts
 
-.PHONY: train modelstats docstats
+all: train modelstats docstats algstats
+
+.PHONY: train modelstats docstats algstats
 train:
-	ghc --make -O2 train
+	ghc --make $(HSFLAGS) train
 
 modelstats:
-	ghc --make -O2 modelstats
+	ghc --make $(HSFLAGS) modelstats
 
 docstats:
-	ghc --make -O2 docstats
+	ghc --make $(HSFLAGS) docstats
+
+algstats:
+	ghc --make $(HSFLAGS) algstats
 
 clean:
-	rm -f train modelstats docstats
+	rm -f train modelstats docstats algstats
 	find . -name \*.hi -delete
 	find . -name \*.o -delete
 

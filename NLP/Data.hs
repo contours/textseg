@@ -17,6 +17,7 @@ module NLP.Data
     , choi
 
     , contours
+    , toJsonRep
 
     , stopWords
     ) where

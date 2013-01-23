@@ -113,10 +113,12 @@ dp cost start end = runST $ do
     bp <- newSTUArray (start,end) (-1)
     -- forward pass
     forM_ [start..end] $ \i -> do
+        -- NB: parallelize some cost evaluations
+        let costs = [cost i j | j <- [i+1..end]] `using` parBuffer 16 rseq
         forM_ [i+1..end] $ \j -> do
             ci <- readArray minCosts i
             cj <- readArray minCosts j
-            let cj' = ci + cost i j
+            let cj' = ci + costs!!(j-i-1)
             when (cj' < cj) $ do
                 writeArray minCosts j cj'
                 writeArray bp j i

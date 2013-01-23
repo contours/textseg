@@ -12,8 +12,8 @@ maintainer:          maslov@cs.unc.edu
 build-type:          Simple
 cabal-version:       >=1.8
 
-executable test
-  main-is:             Main.hs
+executable algstats
+  main-is:             algstats.hs
   ghc-options:         -W -O2 -threaded -rtsopts
   -- other-modules:       
   build-depends:       base ==4.6.*,

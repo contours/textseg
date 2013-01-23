@@ -21,33 +21,10 @@ import qualified NLP.Data
 import           NLP.Data (Annotated(..),Dataset,NamedSegmentation(..),Segmentation)
 import Util
 
--- The Contours data set.
-load_ds_contours = do
-    ds_contours_rybesh <- NLP.Data.contours "/srv/data/u-series"
-
-    -- NB: remove rybesh's segs, since they don't cover all documents in the set
-    let ds_contours = map (\d -> d {
-            segmentation = filter (\s -> segname s /= "annotators:rybesh") (segmentation d)}) ds_contours_rybesh
-
-    return ds_contours
-
--- The Contours data set plus the docsouth reference segmentations (only of those documents).
-load_ds_merged = do
-    ds_contours <- load_ds_contours
-    ds_docsouth <- NLP.Data.contours "/srv/data/docsouth"
-
-    -- add docsouth reference segmentations to all present contours documents
-    let ds_merged = zipWith (\d1 d2 -> Annotated {
-            name = name d1,
-            document = document d1,
-            segmentation = segmentation d1 ++ segmentation d2 })
-            (sortBy (comparing name) (filter (\d -> name d `elem` map name ds_contours) ds_docsouth))
-            (sortBy (comparing name) ds_contours)
-
-    return ds_merged
+import Datasets (load_ds)
 
 ex1 = do
-    ds_merged <- load_ds_merged
+    ds <- load_ds
 
     let (descs, funcs) = unzip
             [("Total mass", \segs -> float (sum (head segs)))
@@ -71,7 +48,7 @@ ex1 = do
                   float x = fromIntegral x :: Double
     printf "\"Document\",%s\n" (intercalate "," (map (\d -> "\""++d++"\"") descs))
 
-    forM_ ds_merged $ \(Annotated docname toks segmentations) -> do
+    forM_ ds $ \(Annotated docname toks segmentations) -> do
         let all_segs = map segseg segmentations
         --let ([segseg->docsouth], map segseg->others) = partition (("annotators:docsouth"==).segname) segmentations
 
