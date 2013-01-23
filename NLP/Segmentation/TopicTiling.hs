@@ -36,6 +36,7 @@ import NLP.Segmentation
 import NLP.Tokenizer
 import NLP.FrequencyVector
 import qualified NLP.LDA as LDA
+import qualified NLP.GibbsLDA as GibbsLDA
 import Util (window)
 
 import qualified NLP.Stemmer
@@ -57,7 +58,8 @@ trainLDA documents =
         num_iter = 500
         words doc = [stem w | Word (BS.map toLower->w) <- doc
                             , not (Set.member w stopWords)]
-    in unsafePerformIO $ getStdRandom $ LDA.estimate a b num_topics num_iter (map words documents)
+    --in unsafePerformIO $ getStdRandom $ LDA.estimate a b num_topics num_iter (map words documents)
+    in unsafePerformIO $ GibbsLDA.estimate a b num_topics num_iter (map words documents)
 
 -- | @topicTiling w model text@.
 -- @w@ is a sentence windowing parameter, and should be set based on the expected length of segments. Depends on the data set, strongly affects results.

@@ -7,6 +7,6 @@ import Datasets (load_training_set)
 main = do
     docs <- load_training_set
     let lda = trainLDA docs
-    encodeFile "/srv/data/interviews.model" lda
+    encodeFile "/srv/data/hybrid.model" lda
 
 
