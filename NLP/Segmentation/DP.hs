@@ -19,6 +19,8 @@ import Control.Monad.ST
 import Data.Array.ST
 import Data.STRef
 import Control.Applicative
+import System.Random
+import Control.Parallel.Strategies
 
 import NLP.Tokenizer
 import NLP.Segmentation
@@ -39,12 +41,12 @@ baseline :: [Token] -> [SentenceMass]
 baseline toks = let
     ppd = preprocess toks
     words = nub (concat ppd)
-    wordMap = Map.fromList (zip words [0..])
+    wordMap = Map.fromList (zip words [1..])
     -- if you say "map" enough times, it stops sounding like a word
     in baseline' $ map (map (wordMap Map.!)) ppd
 
 -- | Algorithm from "A statistical model for domain-independent text segmentation" (Utiyama & Ishara, 2001).
--- Argument: list of sentences, where each word is an integer word ID starting at 0.
+-- Argument: list of sentences, where each word is an integer word ID starting at 1.
 baseline' :: [[Int]] -> [SentenceMass]
 baseline' sentences = let
     n = length sentences
@@ -55,11 +57,11 @@ baseline' sentences = let
     frequency w i = length (filter (==w) (sentences!!i))
 
     -- cum(w,i) is the number of times word w appears before sentence-gap i
+    cum w i = cums ! (w,i)
     -- memoized by an array
-    cums = array ((0,0),(n,m)) $
-        [((0,w), 0) | w <- [0..m]] ++
-        [((i,w), cum w (i-1) + frequency w (i-1)) | i <- [1..n], w <- [0..m]]
-    cum w i = cums ! (i,w)
+    cums = array ((1,0),(m,n)) $
+        [((w,0), 0) | w <- [1..m]] ++
+        [((w,i), cum w (i-1) + frequency w (i-1)) | i <- [1..n], w <- [1..m]]
     -- total(i) is the number of words before sentence-gap i
     total i = sum (map length (take i sentences))
     -- count(w,i,j) is the number of times word w appears in the segment (i,j)
@@ -68,9 +70,9 @@ baseline' sentences = let
     cost i j = log (fromIntegral totalLength) + sum [
         let c = fromIntegral (count k i j)
         in if c > 0 then c * log (fromIntegral (m + total j - total i) / (c+1)) else 0
-        | k <- [0..m-1]]
+        | k <- [1..m]]
 
-    -- The minimum-cost path from 0 to n is the highest-probability segmentation.
+    -- The minimum-cost path from gap 0 to n is the highest-probability segmentation.
     path = dp cost 0 n
 
     in
@@ -80,15 +82,21 @@ lda :: LDA.Model -> [Token] -> [SentenceMass]
 lda model toks = let
     sentences = preprocess toks
     n = length sentences
-    m = length (nub (concat sentences))
     totalLength = sum (map length sentences) :: Int
 
     numIterations = 20
-    ll i j = unsafePerformIO $ LDA.logLikelihood numIterations model $ concat (take (j-i) (drop i sentences))
+    -- FIXME: figure out how to deal with this global RNG crap combined with parallelism
+    -- For now, "withNewRng" splits off a child StdGen from the global, works with it, and then discards it.
+    withNewRng f = do
+        rng <- newStdGen
+        let (a, rng') = f rng
+        return a
+    ll i j = unsafePerformIO $ withNewRng $ LDA.logLikelihood numIterations model $ concat (take (j-i) (drop i sentences))
     -- basic log-likelihood plus the prior/penalty term
     cost i j = - ll i j + 3.0 * log (fromIntegral totalLength)
 
     --path = modifiedDP cost 0 n
+    -- for debugging, print each cost evaluation
     path = modifiedDP (\i j -> let c = cost i j in (i,j,c)`traceShow`c) 0 n
 
     in
@@ -136,20 +144,21 @@ modifiedDP cost start end = runST $ do
     forM_ [start..end] $ \j -> do
         -- Skip begin nodes which are before the last active node.
         active <- readSTRef lastActiveNode
+        -- NB: evaluate costs in parallel
+        let costs = [cost i j | i <- [active..j-1]] `using` parBuffer 8 rseq
         forM_ [active..j-1] $ \i -> do
-            when (i >= active) $ do
-                ci <- readArray minCosts i
-                cj <- readArray minCosts j
-                let cj' = ci + cost i j
-                when (cj' < cj) $ do
-                    writeArray minCosts j cj'
-                    writeArray bp j i
-                    -- Node i is active.
-                    count <- readArray activity i
-                    writeArray activity i (count+1)
-                    -- A node is only considered active "for reals" when
-                    -- it is active at least twice. For robustness, apparently.
-                    when (count >= 1) (writeSTRef lastActiveNode i)
+            ci <- readArray minCosts i
+            cj <- readArray minCosts j
+            let cj' = ci + costs!!(i-active)
+            when (cj' < cj) $ do
+                writeArray minCosts j cj'
+                writeArray bp j i
+                -- Node i is active.
+                count <- readArray activity i
+                writeArray activity i (count+1)
+                -- A node is only considered active "for reals" when
+                -- it is active at least twice. For robustness, apparently.
+                when (count >= 1) (writeSTRef lastActiveNode i)
     -- backward pass
     path <- newSTRef [end]
     let trace j = do

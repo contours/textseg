@@ -7,7 +7,6 @@ module NLP.Segmentation.TopicTiling
     ( trainLDA
     , topicTiling
     , LDA.Model
-    , sentence_docsim
     ) where
 
 import qualified Data.Vector.Generic as V
@@ -30,6 +29,8 @@ import qualified Data.Map as Map
 import Data.Maybe (catMaybes)
 import Text.Printf
 import Data.Binary
+import System.Random
+import Data.Array.IArray (elems)
 
 import NLP.Segmentation
 import NLP.Tokenizer
@@ -56,7 +57,7 @@ trainLDA documents =
         num_iter = 500
         words doc = [stem w | Word (BS.map toLower->w) <- doc
                             , not (Set.member w stopWords)]
-    in unsafePerformIO $ LDA.train a b num_topics num_iter (map words documents)
+    in unsafePerformIO $ getStdRandom $ LDA.estimate a b num_topics num_iter (map words documents)
 
 -- | @topicTiling w model text@.
 -- @w@ is a sentence windowing parameter, and should be set based on the expected length of segments. Depends on the data set, strongly affects results.
@@ -64,7 +65,7 @@ trainLDA documents =
 topicTiling :: Int -> LDA.Model -> [Token] -> [SentenceMass]
 topicTiling w model text = let
     num_iter = 100
-    wordMap = LDA.parseWordMap model
+    wordMap = LDA.wordmap model
     -- Lowercase and remove stop words and unknown words.
     -- Keep the original word-index of each word.
     wordsOf s = [(i, stem w) | (i, Word (BS.map toLower->w)) <- zip [0..] (filter isWord s)
@@ -74,9 +75,10 @@ topicTiling w model text = let
     words = wordsOf text
     -- Infer word topic, sentence-wise (each sentence is considered a separate document).
     -- Passing the True flag to infer enables returning the most common assignment, rather than the last.
+    -- FIXME: chain RNGs together instead of using global here. also keep in mind, getStdRandom can be a barrier when parallelizing
     infer :: IO [Int]
-    infer = map snd . concat . LDA.topic_assignments <$>
-        LDA.infer num_iter True model [map snd ws | ws <- sentenceWords]
+    infer = concatMap elems . LDA.tassign <$> getStdRandom (
+        LDA.infer num_iter True model [map snd ws | ws <- sentenceWords])
     -- wordTopics is the final assignment of a topic to each word in sequence.
     -- This does not include the removed stop words.
     wordTopics0 :: [Int]
@@ -136,70 +138,6 @@ topicTiling w model text = let
         return ()
     in
     --showDebugInfo `seq`
-    masses
-
--- | Execute sentence-wise inference, then calculate similarity between sentences by comparing their topic distributions.
-sentence_docsim :: LDA.Model -> [Token] -> [SentenceMass]
-sentence_docsim model text = let
-    num_iter = 100
-    -- Lowercase, remove stop words, but keep
-    -- the original word-index of each word.
-    wordsOf s = [(i, w) | (i, Word (BS.map toLower->w)) <- zip [0..] (filter isWord s)
-                              , not (Set.member w stopWords)]
-    sentenceWords = map wordsOf (splitAtSentences text)
-    allWords = wordsOf text
-    -- Sentence-wise inference (each sentence is considered a separate document)
-    -- TODO: try using mode method?
-    infer :: IO [Vector Double]
-    infer = map V.fromList . LDA.p_topic_document <$>
-        LDA.infer num_iter False model [map snd ws | ws <- sentenceWords]
-    -- Represent each sentence as a distribution over topics.
-    sentences = map fixup $ unsafePerformIO infer
-    -- Add a small probability to every topic and renormalize; klDivergence doesn't like zeroes.
-    fixup s = vnormalize $ V.map (+ 1e-5) s
-    -- according to Wikipedia, the square root of the divergence is a metric, while the divergence itself is not.
-    metric a b = 1.0 - sqrt (jsDivergence a b)
-    gapScores :: Vector Double
-    gapScores = V.fromList (zipWith metric sentences (tail sentences))
-    gapIndex i = i+1
-
-    -- TODO: unify the following process between TopicTiling and TextTiling.
-
-    -- compute depth score for all local minima
-    numGaps = V.length gapScores
-    lpeak i = findPeak (-1) (gapScores!i) i
-    rpeak i = findPeak ( 1) (gapScores!i) i
-    findPeak dir x i =
-        if | i == 0 && dir == -1 -> max x (gapScores!i)
-           | i == numGaps-1 && dir == 1 -> max x (gapScores!i)
-           | gapScores!i >= x -> findPeak dir (gapScores!i) (i+dir)
-           | otherwise -> x
-    isLocalMinimum i | i == 0 = False
-    isLocalMinimum i | i == numGaps-1 = False
-    isLocalMinimum i = case (compare (gapScores!(i-1)) (gapScores!i), compare (gapScores!i) (gapScores!(i+1))) of
-                            (GT,LT) -> True
-                            (EQ,LT) -> True
-                            (GT,EQ) -> True
-                            _ -> False
-    gapDepths :: Storable.Vector Double
-    gapDepths = V.generate numGaps $ \i ->
-        if isLocalMinimum i
-           then lpeak i + rpeak i - 2*(gapScores!i)
-           else 0
-    valleyDepths = V.filter (>0) gapDepths
-    -- Assign boundaries at any valley deeper than a cutoff threshold.
-    -- here, one stdev deeper than the mean
-    threshold = mean valleyDepths + stddev valleyDepths
-    boundaries = catMaybes $ zipWith assign [0..] (V.toList gapDepths)
-        where assign i score =
-                  if score > threshold
-                     then Just (gapIndex i)
-                     else Nothing
-    SentenceMass total = totalSentenceMass text
-    masses = map SentenceMass $ indicesToMasses boundaries total
-    in
-    --(threshold, gapDepths)
-    --`traceShow`
     masses
 
 -- | Jensen–Shannon divergence, a smoothed and symmetric version of 'klDivergence'.

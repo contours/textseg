@@ -14,7 +14,7 @@ cabal-version:       >=1.8
 
 executable test
   main-is:             Main.hs
-  ghc-options:         -W -O2
+  ghc-options:         -W -O2 -threaded -rtsopts
   -- other-modules:       
   build-depends:       base ==4.6.*,
                        hashable ==1.1.*,
@@ -35,5 +35,7 @@ executable test
                        binary ==0.6.*,
                        filepath ==1.3.*,
                        array ==0.4.*,
-                       aeson ==0.6.*
+                       aeson ==0.6.*,
+                       random ==1.0.*,
+                       parallel ==3.2.*
 

@@ -1,183 +1,326 @@
--- | http://gibbslda.sourceforge.net
-{-# LANGUAGE OverloadedStrings #-}
-module NLP.LDA where
+-- | Pure Haskell implementation of LDA. Cribbed from GibbsLDA++ @ http://gibbslda.sourceforge.net
+{-# LANGUAGE FlexibleContexts #-}
+module NLP.LDA
+    ( Model(..)
+    , estimate
+    , infer
+    , logLikelihood
+) where
 
-import           Data.ByteString.Char8 (ByteString)
-import qualified Data.ByteString.Char8 as BS
-import System.Process
-import System.Posix.Temp
-import Text.Printf
-import System.Exit
-import Control.Exception
-import System.Directory
 import Control.Applicative
-import Data.Attoparsec.ByteString.Char8 hiding (take)
-import Data.Binary hiding (Word)
-import           Data.Map (Map)
-import qualified Data.Map as Map
-import Data.List
+import Control.Monad
+import Control.Monad.ST.Strict
+import Data.Array.IArray
+import Data.Array.ST
 import Data.Array.Unboxed
+import Data.Binary hiding (Word)
+import Data.List
+import Data.Maybe
+import Data.STRef
+import qualified Data.ByteString.Char8 as BS
+import           Data.ByteString.Char8 (ByteString)
+import qualified Data.Map as Map
+import           Data.Map (Map)
+import qualified Data.HashSet as HashSet
+import System.Random
 
-import Debug.Trace
+import Text.Printf
 
 type Word = ByteString
 
+-- | LDA model. Note that all array indices are 1-based, not 0-based.
 data Model = Model {
-    others :: ByteString,
-    -- | The word-topic distributions; a num_topics by num_words matrix.
-    p_word_topic :: UArray (Int,Int) Double,
-    unparsed_p_word_topic :: ByteString,
-    theta :: ByteString,
-    tassign :: ByteString,
-    --twords :: ByteString,
-    wordmap :: ByteString
+    alpha :: Double,
+    beta :: Double,
+    num_topics :: Int,
+    -- | Vocabulary size.
+    num_words :: Int,
+    -- | Number of documents that was used to estimate or infer this model.
+    num_documents :: Int,
+    -- | "phi", the word-topic distributions. A num_topics by num_words matrix.
+    phi :: UArray (Int,Int) Double,
+    -- | "theta", the topic-document distributions. A num_documents by num_topics matrix.
+    theta :: UArray (Int,Int) Double,
+    -- | Topic assignment for each word in each document. AKA "z".
+    tassign :: [UArray Int Int],
+    wordmap :: Map Word Int,
+    -- count variables
+    nw :: UArray (Int,Int) Int,
+    nwsum :: UArray Int Int
     }
 
 instance Binary Model where
-    get = do
-        others <- get
-        unparsed_p_word_topic <- get
-        theta <- get
-        tassign <- get
-        wordmap <- get
-        return $! Model {
-            others = others,
-            p_word_topic = parse_array unparsed_p_word_topic,
-            unparsed_p_word_topic = unparsed_p_word_topic,
-            theta = theta,
-            tassign = tassign,
-            wordmap = wordmap
-            }
+    get = Model
+        <$> get
+        <*> get
+        <*> get
+        <*> get
+        <*> get
+        <*> get
+        <*> get
+        <*> get
+        <*> (Map.fromList <$> get)
+        <*> get
+        <*> get
     put model = do
-        put (others model)
-        put (unparsed_p_word_topic model)
+        put (alpha model)
+        put (beta model)
+        put (num_topics model)
+        put (num_words model)
+        put (num_documents model)
+        put (phi model)
         put (theta model)
         put (tassign model)
-        put (wordmap model)
+        put (Map.toList (wordmap model))
+        put (nw model)
+        put (nwsum model)
 
-tmpdir_prefix = "/tmp/lda-" :: String
-path_to_lda = "" :: String
+estimate :: RandomGen g => Double -> Double -> Int -> Int -> [[Word]] -> g -> (Model, g)
+estimate alpha beta num_topics num_iterations documents rng0 = runST $ do
+    -- Assign an integer to each distinct word, starting at one.
+    -- Run the corpus through a HashSet to quickly find the unique words.
+    let wordmap = Map.fromList $ zip (HashSet.toList (HashSet.fromList (concat documents))) [1..]
+    let num_words = Map.size wordmap
+    let num_documents = length documents
+    let vbeta = fromIntegral num_words * beta
+    let kalpha = fromIntegral num_topics * alpha
+    -- (docs!m!n) is the integer ID of the n'th word of the m'th document.
+    let docs = listBArray (1,num_documents) [listUArray (1,length xs) (map (wordmap Map.!) xs) | xs <- documents]
+    let doc_length i = case bounds (docs!i) of (a,b) -> b - a + 1
 
-train :: Double -> Double -> Int -> Int -> [[Word]] -> IO Model
-train alpha beta num_topics num_iterations docs =
-    bracket (mkdtemp tmpdir_prefix) (removeDirectoryRecursive) $ \tmpdir -> do
-        let inputname = "train"
-        let inputfile = tmpdir++"/"++inputname
-        BS.writeFile inputfile (BS.pack (printf "%d\n" (length docs)))
-        BS.appendFile inputfile $ BS.intercalate "\n" $ map (BS.intercalate " ") docs
-        errno <- withCurrentDirectory tmpdir $
-            system (printf "%slda -est -alpha %f -beta %f -ntopics %d -niters %d -savestep %d -dfile '%s' >/dev/null"
-                path_to_lda alpha beta num_topics num_iterations num_iterations inputfile)
-        case errno of { ExitFailure e -> fail (printf "lda failed with exit code %d" e); _ -> return () }
-        -- now read back the model info
-        let prefix = tmpdir++"/model-final." 
-        u_pwt <- BS.readFile (prefix++"phi")
-        model <- Model <$>
-            BS.readFile (prefix++"others") <*>
-            pure (parse_array u_pwt) <*>
-            pure u_pwt <*>
-            BS.readFile (prefix++"theta") <*>
-            BS.readFile (prefix++"tassign") <*>
-            --BS.readFile (prefix++"twords") <*>
-            BS.readFile (tmpdir++"/wordmap.txt")
-        return model
+    -- nw[i,j]: number of instances of word i assigned to topic j
+    nw <- newSTUArray ((1,1),(num_words,num_topics)) (0 :: Int)
+    -- nd[i,j]: number of words in document i assigned to topic j
+    nd <- newSTUArray ((1,1),(num_documents,num_topics)) (0 :: Int)
+    -- nwsum[j]: total number of words assigned to topic j
+    nwsum <- newSTUArray (1,num_topics) (0 :: Int)
+    -- ndsum[i]: total number of words in document i
+    -- You'd think this would be a constant, but see the 'sampling' function.
+    ndsum <- newListSTUArray (1,num_documents) (map doc_length [1..num_documents])
+    -- z[i,j]: topic assigned to word j of document i
+    -- (Array of STUArrays)
+    z <- listBArray (1,num_documents) <$> sequence [newSTUArray (1,doc_length i) (0 :: Int) | i <- [1..num_documents]]
 
-infer :: Int -> Bool -> Model -> [[Word]] -> IO Model
-infer num_iterations mode_method model docs =
-    bracket (mkdtemp tmpdir_prefix) (removeDirectoryRecursive) $ \tmpdir -> do
-        let inputname = "infer"
-        let inputfile = tmpdir++"/"++inputname
-        BS.writeFile inputfile (BS.pack (printf "%d\n" (length docs)))
-        BS.appendFile inputfile $ BS.intercalate "\n" $ map (BS.intercalate " ") docs
-        let modelname = "model"
-        -- write model
-        let prefix = tmpdir++"/"++modelname++"."
-        BS.writeFile (prefix++"others")  (others model)
-        BS.writeFile (prefix++"phi")     (unparsed_p_word_topic model)
-        BS.writeFile (prefix++"theta")   (theta model)
-        BS.writeFile (prefix++"tassign") (tassign model)
-        --BS.writeFile (prefix++"twords")  (twords model)
-        BS.writeFile (tmpdir++"/wordmap.txt") (wordmap model)
-        errno <- withCurrentDirectory tmpdir $
-            system (printf "%slda -inf -dir '%s' -model '%s' -niters %d -dfile '%s' -modemethod %d >/dev/null"
-                path_to_lda tmpdir modelname num_iterations inputname (if mode_method then 1::Int else 0))
-        case errno of { ExitFailure e -> fail (printf "lda failed with exit code %d" e); _ -> return () }
-        -- read inferences
-        let prefix = tmpdir++"/"++inputname++"."
-        u_pwt <- BS.readFile (prefix++"phi")
-        inference <- Model <$>
-            BS.readFile (prefix++"others") <*>
-            pure (parse_array u_pwt) <*>
-            pure u_pwt <*>
-            BS.readFile (prefix++"theta") <*>
-            BS.readFile (prefix++"tassign") <*>
-            --BS.readFile (prefix++"twords") <*>
-            pure (wordmap model)
-        return inference
+    rng <- newSTRef rng0
 
-topic_assignments :: Model -> [[(Word,Int)]]
-topic_assignments model = case parseOnly assignments (tassign model) of
-                               Left err -> error err
-                               Right as -> as
-    where assignments = assignment `sepBy` string "\n"
-          assignment = pair `sepBy` string " "
-          pair = do
-              w <- word
-              string ":"
-              t <- topic
-              return (BS.pack w,t)
-          word = many1 (satisfy (/= ':'))
-          topic = decimal :: Parser Int
+    -- initialize topic assignments randomly
+    forM_ [1..num_documents] $ \m -> do
+        forM_ [1..doc_length m] $ \n -> do
+            topic <- withRng rng (randomR (1,num_topics))
+            writeArray (z!m) n topic
+            modifyArray nw (docs!m!n,topic) (+1)
+            modifyArray nd (m,topic) (+1)
+            modifyArray nwsum topic (+1)
 
--- | The topic-document distributions; a num_documents by num_topics matrix.
-p_topic_document :: Model -> [[Double]]
-p_topic_document model = case parseOnly documents (theta model) of
-                              Left err -> error err
-                              Right ps -> dropWhileEnd null ps
-    -- NB: separator is space AND newline
-    where documents = document `sepBy` string " \n"
-          document = p `sepBy` string " "
-          p = rational
+    let sampling m n = do
+            let w = docs!m!n
+            -- remove z_i from the count variables
+            topic <- readArray (z!m) n
+            modifyArray nw (w,topic) (subtract 1) 
+            modifyArray nd (m,topic) (subtract 1)
+            modifyArray nwsum topic (subtract 1)
+            modifyArray ndsum m (subtract 1)
 
-parse_array :: ByteString -> UArray (Int,Int) Double
-parse_array str = case parseOnly topics str of
-                       Left err -> error err
-                       Right ps -> listArray ((1,1),(length (dropWhileEnd null ps), length (head ps))) (concat ps)
-    where topics = topic `sepBy` string " \n"
-          topic = p `sepBy` string " "
-          p = rational
+            ndsumm <- fromIntegral <$> readArray ndsum m
+            -- do multinomial sampling
+            ps <- forM [1..num_topics] $ \k -> do
+                nwwk <- fromIntegral <$> readArray nw (w,k)
+                nwsumk <- fromIntegral <$> readArray nwsum k
+                ndmk <- fromIntegral <$> readArray nd (m,k)
+                return $! (nwwk + beta) / (nwsumk + vbeta) * (ndmk + alpha) / (ndsumm + kalpha)
+            topic <- (1+) <$> withRng rng (multinomialSample ps)
 
--- rather slow
---unparse_array :: UArray (Int,Int) Double -> ByteString
---unparse_array arr = BS.unlines [BS.unwords [BS.pack (show (arr!(i,j))) | j <- [1..fst (snd (bounds arr))]] | i <- [1..snd (snd (bounds arr))]]
+            -- add newly estimated z_i to count variables
+            modifyArray nw (w,topic) (+1) 
+            modifyArray nd (m,topic) (+1)
+            modifyArray nwsum topic (+1)
+            modifyArray ndsum m (+1)
+            return topic
+
+    forM_ [1..num_iterations] $ \iter -> do
+        -- XXX: make progress printing optional, or remove entirely, or something else
+        unsafeIOToST $ printf "LDA estimation @ iteration %d/%d\n" iter num_iterations
+        forM_ [1..num_documents] $ \m -> do
+            forM_ [1..doc_length m] $ \n -> do
+                topic <- sampling m n
+                writeArray (z!m) n topic
+
+    -- compute theta
+    theta <- newSTUArray ((1,1),(num_documents,num_topics)) (0 :: Double)
+    forM_ [1..num_documents] $ \m -> do
+        forM_ [1..num_topics] $ \k -> do
+            ndmk <- fromIntegral <$> readArray nd (m,k)
+            ndsumm <- fromIntegral <$> readArray ndsum m
+            writeArray theta (m,k) $ (ndmk+alpha)/(ndsumm+kalpha)
+                
+    -- compute phi
+    phi <- newSTUArray ((1,1),(num_topics,num_words)) (0 :: Double)
+    forM_ [1..num_topics] $ \k -> do
+        forM_ [1..num_words] $ \w -> do
+            nwwk <- fromIntegral <$> readArray nw (w,k)
+            nwsumk <- fromIntegral <$> readArray nwsum k
+            writeArray phi (k,w) $ (nwwk+beta)/(nwsumk+vbeta)
+
+    frozen_phi <- unsafeFreeze phi
+    frozen_theta <- unsafeFreeze theta
+    frozen_z <- mapM unsafeFreeze (elems z)
+    frozen_nw <- unsafeFreeze nw
+    frozen_nwsum <- unsafeFreeze nwsum
+    rng1 <- readSTRef rng
+
+    return $! (Model {
+        alpha = alpha,
+        beta = beta,
+        num_topics = num_topics,
+        num_words = num_words,
+        num_documents = num_documents,
+        phi = frozen_phi,
+        theta = frozen_theta,
+        tassign = frozen_z,
+        wordmap = wordmap,
+        nw = frozen_nw,
+        nwsum = frozen_nwsum
+        }, rng1)
+
+-- | Fields of Model updated: num_documents, tassign, phi, theta.
+infer :: RandomGen g => Int -> Bool -> Model -> [[Word]] -> g -> (Model, g)
+infer num_iterations mode_method model documents rng0 = runST $ do
+    let num_documents = length documents
+    let vbeta = fromIntegral (num_words model) * (beta model)
+    let kalpha = fromIntegral (num_topics model) * (alpha model)
+    -- TODO: do something cleverer than excising unknown words
+    let filteredDocuments = [mapMaybe (flip Map.lookup (wordmap model)) xs | xs <- documents]
+    let docs = listBArray (1,num_documents) [listUArray (1,length xs) xs | xs <- filteredDocuments]
+    let doc_length i = case bounds (docs!i) of (a,b) -> b - a + 1
+
+    -- Load count variables from original training data.
+    -- Note that changes to these are NOT saved in the result.
+    let old_nw = nw model
+    let old_nwsum = nwsum model
+    --let old_nwsum = listArray (1,num_topics) [sum [old_nw!(w,k) | w <- [1..num_words model]] | k <- [1..num_topics model]]
+
+    -- nw[i,j]: number of instances of word i assigned to topic j
+    nw <- newSTUArray ((1,1),(num_words model,num_topics model)) (0 :: Int)
+    -- nd[i,j]: number of words in document i assigned to topic j
+    nd <- newSTUArray ((1,1),(num_documents,num_topics model)) (0 :: Int)
+    -- nwsum[j]: total number of words assigned to topic j
+    nwsum <- newSTUArray (1,num_topics model) (0 :: Int)
+    -- ndsum[i]: total number of words in document i
+    -- You'd think this would be a constant, but see the 'sampling' function.
+    ndsum <- newListSTUArray (1,num_documents) (map doc_length [1..num_documents])
+    -- z[i,j]: topic assigned to word j of document i
+    -- (Array of STUArrays)
+    z <- listBArray (1,num_documents) <$> sequence [newSTUArray (1,doc_length i) (0 :: Int) | i <- [1..num_documents]]
+
+    rng <- newSTRef rng0
+
+    -- initialize topic assignments randomly
+    forM_ [1..num_documents] $ \m -> do
+        forM_ [1..doc_length m] $ \n -> do
+            topic <- withRng rng (randomR (1,num_topics model))
+            writeArray (z!m) n topic
+            modifyArray nw (docs!m!n,topic) (+1)
+            modifyArray nd (m,topic) (+1)
+            modifyArray nwsum topic (+1)
+
+    let sampling m n = do
+            let w = docs!m!n
+            -- remove z_i from the count variables
+            topic <- readArray (z!m) n
+            modifyArray nw (w,topic) (subtract 1) 
+            modifyArray nd (m,topic) (subtract 1)
+            modifyArray nwsum topic (subtract 1)
+            modifyArray ndsum m (subtract 1)
+
+            ndsumm <- fromIntegral <$> readArray ndsum m
+            -- do multinomial sampling
+            ps <- forM [1..num_topics model] $ \k -> do
+                let old_nwwk = fromIntegral $ old_nw!(w,k)
+                let old_nwsumk = fromIntegral $ old_nwsum!k
+                nwwk <- fromIntegral <$> readArray nw (w,k)
+                nwsumk <- fromIntegral <$> readArray nwsum k
+                ndmk <- fromIntegral <$> readArray nd (m,k)
+                return $! (old_nwwk + nwwk + beta model) / (old_nwsumk + nwsumk + vbeta)
+                        * (ndmk + alpha model) / (ndsumm + kalpha)
+            topic <- (1+) <$> withRng rng (multinomialSample ps)
+            -- add newly estimated z_i to count variables
+            modifyArray nw (w,topic) (+1) 
+            modifyArray nd (m,topic) (+1)
+            modifyArray nwsum topic (+1)
+            modifyArray ndsum m (+1)
+            return topic
+
+    forM_ [1..num_iterations] $ \iter -> do
+        forM_ [1..num_documents] $ \m -> do
+            forM_ [1..doc_length m] $ \n -> do
+                topic <- sampling m n
+                writeArray (z!m) n topic
+
+    -- compute theta
+    theta <- newSTUArray ((1,1),(num_documents,num_topics model)) (0 :: Double)
+    forM_ [1..num_documents] $ \m -> do
+        forM_ [1..num_topics model] $ \k -> do
+            ndmk <- fromIntegral <$> readArray nd (m,k)
+            ndsumm <- fromIntegral <$> readArray ndsum m
+            writeArray theta (m,k) $ (ndmk+alpha model)/(ndsumm+kalpha)
+                
+    -- compute phi
+    phi <- newSTUArray ((1,1),(num_topics model,num_words model)) (0 :: Double)
+    forM_ [1..num_topics model] $ \k -> do
+        forM_ [1..num_words model] $ \w -> do
+            nwwk <- fromIntegral <$> readArray nw (w,k)
+            nwsumk <- fromIntegral <$> readArray nwsum k
+            writeArray phi (k,w) $ (nwwk+beta model)/(nwsumk+vbeta)
+
+    frozen_phi <- unsafeFreeze phi
+    frozen_theta <- unsafeFreeze theta
+    frozen_z <- mapM unsafeFreeze (elems z)
+    rng1 <- readSTRef rng
+
+    return $! (model {
+        num_documents = num_documents,
+        phi = frozen_phi,
+        theta = frozen_theta,
+        tassign = frozen_z
+        }, rng1)
 
 -- | Compute the log-likelihood of a new document.
-logLikelihood :: Int -> Model -> [Word] -> IO Double
-logLikelihood num_iterations model0 doc = do
-    model <- infer num_iterations False model0 [doc]
-    let [theta] = p_topic_document model
-        phi = p_word_topic model0
-        num_topics = length theta
-        doc' = map (\w -> Map.findWithDefault (-1) w (parseWordMap model)) doc
-        count v = fromIntegral (length (filter (==v) doc'))
-        ll = sum [count v * log (sum [(theta!!t) * (phi!(t+1,v+1)) | t <- [0..num_topics-1]]) | v <- delete (-1) (nub doc')]
-    return ll
+logLikelihood :: Int -> Model -> [Word] -> StdGen -> (Double, StdGen)
+logLikelihood num_iterations model0 doc rng0 = let
+    (model,rng1) = infer num_iterations False model0 [doc] rng0
+    doc' = map (\w -> Map.findWithDefault (-1) w (wordmap model)) doc
+    count v = fromIntegral (length (filter (==v) doc'))
+    ll = sum [count v * log (sum [(theta model!(1,t)) * (phi model!(t,v)) | t <- [1..num_topics model]]) | v <- delete (-1) (nub doc')]
+    in (ll,rng1)
 
-parseWordMap :: Model -> Map Word Int
-parseWordMap model = case parseOnly themap (wordmap model) of
-                          Left err -> error err
-                          Right wm -> Map.fromList wm
-    where themap = decimal >> skipSpace >> (pair `sepBy` skipSpace)
-          pair = do
-              l <- takeTill isSpace
-              skipSpace
-              r <- decimal
-              skipSpace
-              return (l,r)
+-- A convenient type annotation, specializing newArray to the actual implementation (ST-Unboxed) we use.
+newSTUArray :: (MArray (STUArray s) e (ST s), Ix i) => (i, i) -> e -> ST s (STUArray s i e)
+newSTUArray = newArray
 
--- | Change to the given directory, perform an action, then change back.
-withCurrentDirectory :: FilePath -> IO a -> IO a
-withCurrentDirectory dir action = do
-    here <- getCurrentDirectory
-    bracket_ (setCurrentDirectory dir) (setCurrentDirectory here) action
+newListSTUArray :: (MArray (STUArray s) e (ST s), Ix i) => (i, i) -> [e] -> ST s (STUArray s i e)
+newListSTUArray = newListArray
+
+thawSTU :: (Ix i, IArray a e, MArray (STUArray s) e (ST s)) => a i e -> ST s (STUArray s i e)
+thawSTU = thaw
+
+listUArray :: (IArray UArray e, Ix i) => (i, i) -> [e] -> UArray i e
+listUArray = listArray
+listBArray :: (IArray Array e, Ix i) => (i, i) -> [e] -> Array i e
+listBArray = listArray
+
+modifyArray :: (Monad m, MArray a e m, Ix i) => a i e -> i -> (e -> e) -> m ()
+modifyArray arr i f = readArray arr i >>= writeArray arr i . f
+
+-- | Takes a list of probabilities (bin weights) and returns the index of the selected bin (and the new RNG).
+multinomialSample :: RandomGen g => [Double] -> g -> (Int,g)
+multinomialSample ps rng = let cs = tail (scanl (+) 0 ps)
+                               (u,rng') = randomR (0, last cs) rng
+                               Just i = findIndex (> u) cs
+                           in (i, rng')
+
+withRng rng f = do
+    rng0 <- readSTRef rng
+    let (x, rng1) = f rng0
+    writeSTRef rng rng1
+    return x
 

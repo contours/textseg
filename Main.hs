@@ -44,12 +44,7 @@ main = do
             (sortBy (comparing name) (filter (\d -> name d `elem` map name ds_contours_norybesh) ds_docsouth))
             (sortBy (comparing name) ds_contours_norybesh)
 
-    putStrLn "**** Contours"
-    showDatasetInfo ds_contours_norybesh
-    putStrLn "**** Docsouth"
-    --showDatasetInfo ds_docsouth
-    putStrLn "**** Contours+Docsouth"
-    showDatasetInfo ds_merged
+    --showDatasetInfo ds_merged
 
     --let trainSet = removeIndex 10 ds
     --let testSet = [ds !! 10]
@@ -78,11 +73,10 @@ main = do
     let adapt f toks = fromLinearMass toks (f toks)
     let methods = 
             [ ("TextTiling", adapt textTiling)
-            , ("TopicTiling", adapt (topicTiling 6 lda))
-            , ("DP baseline", adapt DP.baseline)
             , ("DP-LDA", adapt (DP.lda lda))
+            , ("DP baseline", adapt DP.baseline)
+            , ("TopicTiling", adapt (topicTiling 6 lda))
             --, ("TextTilingNLTK", nltkTextTiling)
-            --, ("JS-divergence", adapt (sentence_docsim lda))
             ] :: [(String, [Token] -> [SentenceMass])]
 
     forM_ testSet $ \(Annotated name toks refsegs) -> do
@@ -99,9 +93,6 @@ main = do
             printf "Mean Pk       :\t%.4f\n" (mean (map (pk s) refs) :: Double)
             printf "Mean S        :\t%.4f\n" (mean (map (similarity s) refs) :: Double)
             --printf "Agreement drop:\t%.4f\n" (agreementDrop [s] [refs])
-
---agreementDrop :: Integral t => [Segmentation t] -> [[Segmentation t]] -> Double
---agreementDrop hyp refs = agreement_fleiss_kappa refs - agreement_fleiss_kappa (hyp:refs)
 
 showDatasetInfo :: Integral a => [Annotated a] -> IO ()
 showDatasetInfo ds = do
