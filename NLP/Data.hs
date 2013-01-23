@@ -22,6 +22,7 @@ module NLP.Data
     ) where
 
 import qualified Data.ByteString.Lazy as BSL
+import qualified Data.Text as Text
 import qualified Data.ByteString.Char8 as BS 
 import           Data.ByteString.Char8 (ByteString)
 import Data.Attoparsec.ByteString.Char8
@@ -169,25 +170,34 @@ data JsonRep t = JsonRep {
 
 data JsonDoc t = JsonDoc {
     jsName :: ByteString,
-    jsSegs :: [JsonSeg t]
+    jsSegs :: [NamedSegmentation t]
     }
-
-data JsonSeg t = JsonSeg {
-    jsCoder :: ByteString,
-    jsSeg :: [t]
-    } deriving Show
 
 instance FromJSON t => FromJSON (JsonRep t) where
     parseJSON (Object v) = do
         hm <- v .: "items"
         JsonRep <$> forM (Map.toList hm) doc
         where doc (name, item) = JsonDoc <$> pure name <*> (mapM seg =<< return . Map.toList =<< parseJSON item)
-              seg (coder, item) = JsonSeg <$> pure coder <*> parseJSON item
+              seg (coder, item) = NamedSegmentation <$> pure coder <*> parseJSON item
+
+instance Integral t => ToJSON (JsonRep t) where
+    toJSON (JsonRep docs) = object
+        [ "id" .= ("exported-from-textseg"::String)
+        , "segmentation_type" .= ("linear"::String)
+        , "items" .= object (map f docs) ]
+        where f (JsonDoc name segs) =
+                  Text.pack (BS.unpack name) .= object (map g segs)
+              g (NamedSegmentation name masses) =
+                  Text.pack name .= map toInteger masses
 
 deriving instance FromJSON CharacterMass
 deriving instance FromJSON WordMass
 deriving instance FromJSON SentenceMass
 deriving instance FromJSON ParagraphMass
+
+toJsonRep :: Dataset t -> JsonRep t
+toJsonRep docs = JsonRep (map doc docs)
+    where doc (Annotated name _ segs) = JsonDoc (BS.pack name) segs
 
 -- Assumes interview texts are strictly one-sentence-per-line, without speaker names, and with no further explicit tokenization.
 contours :: FilePath -> IO (Dataset SentenceMass)
@@ -201,5 +211,5 @@ contours path = do
         let filename = combine path basename ++ ".txt"
         txt <- BS.readFile filename
         let doc = breakPunctuation $ breakContractions $ simpleTokenize txt
-        return (Annotated basename doc [NamedSegmentation (BS.unpack name) (dropWhile (==0) s) | JsonSeg name s <- segs])
+        return (Annotated basename doc [NamedSegmentation name (dropWhile (==0) s) | NamedSegmentation name s <- segs])
 
