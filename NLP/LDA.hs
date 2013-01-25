@@ -30,13 +30,13 @@ type Word = ByteString
 
 -- | LDA model. Note that all array indices are 1-based, not 0-based.
 data Model = Model {
-    alpha :: Double,
-    beta :: Double,
-    num_topics :: Int,
+    alpha :: !Double,
+    beta :: !Double,
+    num_topics :: !Int,
     -- | Vocabulary size.
-    num_words :: Int,
+    num_words :: !Int,
     -- | Number of documents that was used to estimate or infer this model.
-    num_documents :: Int,
+    num_documents :: !Int,
     -- | "phi", the word-topic distributions. A num_topics by num_words matrix.
     phi :: UArray (Int,Int) Double,
     -- | "theta", the topic-document distributions. A num_documents by num_topics matrix.
@@ -256,6 +256,8 @@ infer num_iterations mode_method model documents rng0 = runST $ do
                 topic <- sampling m n
                 writeArray (z!m) n topic
 
+    -- FIXME: use mode_method for final topic assignments
+
     -- compute theta
     theta <- newSTUArray ((1,1),(num_documents,num_topics model)) (0 :: Double)
     forM_ [1..num_documents] $ \m -> do
@@ -294,30 +296,39 @@ logLikelihood num_iterations model0 doc rng0 = let
     in (ll,rng1)
 
 -- A convenient type annotation, specializing newArray to the actual implementation (ST-Unboxed) we use.
+{-# INLINE newSTUArray #-}
 newSTUArray :: (MArray (STUArray s) e (ST s), Ix i) => (i, i) -> e -> ST s (STUArray s i e)
 newSTUArray = newArray
-
+{-# INLINE newListSTUArray #-}
 newListSTUArray :: (MArray (STUArray s) e (ST s), Ix i) => (i, i) -> [e] -> ST s (STUArray s i e)
 newListSTUArray = newListArray
-
+{-# INLINE thawSTU #-}
 thawSTU :: (Ix i, IArray a e, MArray (STUArray s) e (ST s)) => a i e -> ST s (STUArray s i e)
 thawSTU = thaw
-
+{-# INLINE listUArray #-}
 listUArray :: (IArray UArray e, Ix i) => (i, i) -> [e] -> UArray i e
 listUArray = listArray
+{-# INLINE listBArray #-}
 listBArray :: (IArray Array e, Ix i) => (i, i) -> [e] -> Array i e
 listBArray = listArray
-
+{-# INLINE modifyArray #-}
 modifyArray :: (Monad m, MArray a e m, Ix i) => a i e -> i -> (e -> e) -> m ()
 modifyArray arr i f = readArray arr i >>= writeArray arr i . f
 
 -- | Takes a list of probabilities (bin weights) and returns the index of the selected bin (and the new RNG).
+{-# INLINE multinomialSample #-}
 multinomialSample :: RandomGen g => [Double] -> g -> (Int,g)
-multinomialSample ps rng = let cs = tail (scanl (+) 0 ps)
-                               (u,rng') = randomR (0, last cs) rng
-                               Just i = findIndex (> u) cs
+multinomialSample ps rng = let (u,rng') = randomR (0, sum ps) rng
+                               Just i = findIndexCumulative (> u) ps
                            in (i, rng')
 
+{-# INLINE findIndexCumulative #-}
+findIndexCumulative f (x:xs) = go 0 x xs
+    where go i a (b:bs) = if f a then Just i else go (i+1) (a+b) bs
+          go i a [] = if f a then Just i else Nothing
+
+{-# INLINE withRng #-}
+withRng :: STRef s a -> (a -> (b, a)) -> ST s b
 withRng rng f = do
     rng0 <- readSTRef rng
     let (x, rng1) = f rng0

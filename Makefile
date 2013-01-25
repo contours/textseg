@@ -1,4 +1,4 @@
-HSFLAGS = -O2 -threaded -rtsopts
+HSFLAGS = -O2 -threaded -rtsopts -funbox-strict-fields -optc-O3 -optc-march=native -optc-msse4
 
 all: train modelstats docstats algstats
 

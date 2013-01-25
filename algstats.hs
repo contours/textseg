@@ -9,6 +9,7 @@ import System.Directory (doesFileExist)
 import Data.Binary
 import System.Environment (getArgs)
 import qualified Data.Aeson as Aeson
+import Control.Applicative
 
 import NLP.Tokenizer
 import NLP.Segmentation
@@ -27,8 +28,8 @@ main = do
     args <- getArgs
     testSet <- load_ds
 
-    putStrLn "Test set info:"
-    showDatasetInfo testSet
+    --putStrLn "Test set info:"
+    --showDatasetInfo testSet
 
     let lda_file = case args of
                         [p] -> p
@@ -40,14 +41,13 @@ main = do
             decodeFile lda_file
         False -> do
             fail $ printf "Model file does not exist: %s\n" lda_file
-    let _ = lda :: Int
 
     let adapt f toks = fromLinearMass toks (f toks)
     let methods = 
             [ ("TextTiling", adapt textTiling)
-            --, ("DP-LDA", adapt (DP.lda lda))
+            , ("TopicTiling", adapt (topicTiling 8 lda))
             , ("DP-Baseline", adapt DP.baseline)
-            --, ("TopicTiling", adapt (topicTiling 6 lda))
+            , ("DP-LDA", adapt (DP.lda lda))
             ] :: [(String, [Token] -> [SentenceMass])]
 
     BSL.writeFile "out-annotations.json" $ Aeson.encode $ NLP.Data.toJsonRep $ testSet
@@ -58,9 +58,9 @@ main = do
         printf "------------- %s\n" algname
         out <- forM testSet $ \(Annotated docname toks refsegs) -> do
             let refs = map (\(NamedSegmentation _ s) -> toSentenceMass toks s) refsegs
+            printf "-- %s\n" docname
             forM_ refs (printf "Reference:      %s\n" . prn)
             let s = segment toks
-            printf "-- %s\n" docname
             printf "Segments      :\t%s\n"   (prn s)
             printf "Mean Pk       :\t%.4f\n" (mean (map (pk s) refs) :: Double)
             printf "Mean S        :\t%.4f\n" (mean (map (similarity s) refs) :: Double)

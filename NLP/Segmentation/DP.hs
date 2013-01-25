@@ -95,9 +95,9 @@ lda model toks = let
     -- basic log-likelihood plus the prior/penalty term
     cost i j = - ll i j + 3.0 * log (fromIntegral totalLength)
 
-    --path = modifiedDP cost 0 n
+    path = modifiedDP cost 0 n
     -- for debugging, print each cost evaluation
-    path = modifiedDP (\i j -> let c = cost i j in (i,j,c)`traceShow`c) 0 n
+    --path = modifiedDP (\i j -> let c = cost i j in (i,j,c)`traceShow`c) 0 n
 
     in
     map SentenceMass $ indicesToMasses (tail (init path)) n
