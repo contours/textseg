@@ -211,6 +211,8 @@ infer num_iterations mode_method model documents rng0 = runST $ do
     -- z[i,j]: topic assigned to word j of document i
     -- (Array of STUArrays)
     z <- listBArray (1,num_documents) <$> sequence [newSTUArray (1,doc_length i) (0 :: Int) | i <- [1..num_documents]]
+    -- z_count[i,j,k]: number of times topic k was assigned to word j of document i (for mode_method)
+    z_count <- listBArray (1,num_documents) <$> sequence [newSTUArray ((1,1),(doc_length i,num_topics model)) (0 :: Int) | i <- [1..num_documents]]
 
     rng <- newSTRef rng0
 
@@ -219,6 +221,7 @@ infer num_iterations mode_method model documents rng0 = runST $ do
         forM_ [1..doc_length m] $ \n -> do
             topic <- withRng rng (randomR (1,num_topics model))
             writeArray (z!m) n topic
+            modifyArray (z_count!m) (n,topic) (+1)
             modifyArray nw (docs!m!n,topic) (+1)
             modifyArray nd (m,topic) (+1)
             modifyArray nwsum topic (+1)
@@ -255,8 +258,22 @@ infer num_iterations mode_method model documents rng0 = runST $ do
             forM_ [1..doc_length m] $ \n -> do
                 topic <- sampling m n
                 writeArray (z!m) n topic
+                modifyArray (z_count!m) (n,topic) (+1)
 
-    -- FIXME: use mode_method for final topic assignments
+    -- when mode_method is enabled, set final topic assignments (z)
+    -- to most frequent topic assignments (argmax z_count)
+    when mode_method $ do
+        forM_ [1..num_documents] $ \m -> do
+            forM_ [1..doc_length m] $ \n -> do
+                top <- newSTRef 0
+                top_count <- newSTRef 0
+                forM_ [1..num_topics model] $ \k -> do
+                    c <- readSTRef top_count
+                    c' <- readArray (z_count!m) (n,k)
+                    when (c' > c) $ do
+                        writeSTRef top k
+                        writeSTRef top_count c'
+                writeArray (z!m) n =<< readSTRef top
 
     -- compute theta
     theta <- newSTUArray ((1,1),(num_documents,num_topics model)) (0 :: Double)
