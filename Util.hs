@@ -4,6 +4,12 @@ module Util where
 mean :: (Real a, Fractional b) => [a] -> b
 mean xs = realToFrac (sum xs) / fromIntegral (length xs)
 
+variance :: (Real a, Fractional b) => [a] -> b
+variance xs = mean [(x-m)*(x-m) | x <- map realToFrac xs] where m = mean xs
+
+stdev :: (Real a, Floating b) => [a] -> b
+stdev = sqrt . variance
+
 -- | @window width step xs@ produces consecutive sublists of @xs@ with the given width and advancing by @step@ each time. When @step == width@, the windows are non-overlapping. Some elements from the end of @xs@ may not appear, depending on how divisible its length is by @window@ and @width@.
 window :: Int -> Int -> [a] -> [[a]]
 window _ _ [] = []

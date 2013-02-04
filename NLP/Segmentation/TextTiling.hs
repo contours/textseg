@@ -9,7 +9,6 @@ import System.IO.Unsafe
 import Data.Packed
 import Numeric.Container
 import Numeric.LinearAlgebra.Util
-import Numeric.GSL.Statistics (mean,stddev)
 import Data.Maybe
 import Data.Char
 --import Data.List
@@ -25,16 +24,19 @@ import Text.Printf
 --  * numeric parameters: w, k, smoothing radius
 --  * use top-N valleys, or use threshold: high or low
 
-import Util hiding (mean)
+import Util (mean,stdev,window)
 import NLP.Tokenizer
 import NLP.Stemmer
 import NLP.FrequencyVector
 import NLP.Segmentation
 import NLP.Data (stopWords)
 
+-- | TextTiling algorithm.
+-- Parameters: @textTiling threshold_multiplier tokens@
+-- @threshold_multiplier@ is how many standard deviations to add to the mean valley depth when computing the gap threshold. Recommended values are (-1) or (+1).
 -- TODO: allow desired number of segments to be given.
-textTiling :: [Token] -> [WordMass]
-textTiling text = let
+textTiling :: Double -> [Token] -> [WordMass]
+textTiling threshold_multiplier text = let
     -- Lowercase, remove stop words, and stem, but keep
     -- the original word-index of each word.
     words :: [(Int, ByteString)]
@@ -87,10 +89,9 @@ textTiling text = let
     numValleys = length (filter (>0) (toList gapDepths))
     valleyDepths = filter (>0) (toList gapDepths)
     -- Assign boundaries at any valley deeper than a cutoff threshold.
-    -- here, one stdev shallower than the mean
     threshold = if length valleyDepths == 0
                    then 0
-                   else mean (fromList valleyDepths) - stddev (fromList valleyDepths)
+                   else mean valleyDepths + threshold_multiplier * stdev valleyDepths
     boundaries1 = catMaybes $ zipWith assign gapIndices (toList gapDepths)
         where assign i score = if score > threshold then Just i else Nothing
     -- Remove boundaries too near each other.

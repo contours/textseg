@@ -61,11 +61,18 @@ trainLDA documents =
     --in unsafePerformIO $ getStdRandom $ LDA.estimate a b num_topics num_iter (map words documents)
     in unsafePerformIO $ GibbsLDA.estimate a b num_topics num_iter (map words documents)
 
--- | @topicTiling w model text@.
+infer :: (Int, LDA.Model, [[ByteString]]) -> [Int]
+-- Infer word topic, sentence-wise (each sentence is considered a separate document).
+-- Passing the True flag to infer enables returning the most common assignment, rather than the last.
+-- FIXME: chain RNGs together instead of using global here. also keep in mind, getStdRandom can be a barrier when parallelizing
+infer (num_iter,model,sentenceWords) = unsafePerformIO $ concatMap elems . LDA.tassign <$> getStdRandom (LDA.infer num_iter True model sentenceWords)
+
+-- | @topicTiling w threshold_multiplier model text@.
 -- @w@ is a sentence windowing parameter, and should be set based on the expected length of segments. Depends on the data set, strongly affects results.
+-- @threshold_multiplier@ is how many standard deviations to add to the mean valley depth when computing the gap threshold. Recommended values are (-1) or (+1).
 -- TODO: allow desired number of segments to be given.
-topicTiling :: Int -> LDA.Model -> [Token] -> [SentenceMass]
-topicTiling w model text = let
+topicTiling :: Int -> Double -> LDA.Model -> [Token] -> [SentenceMass]
+topicTiling w threshold_multiplier model text = let
     num_iter = 100
     wordMap = LDA.wordmap model
     -- Lowercase and remove stop words and unknown words.
@@ -75,16 +82,10 @@ topicTiling w model text = let
                              , Map.member w wordMap]
     sentenceWords = map wordsOf (splitAtSentences text)
     words = wordsOf text
-    -- Infer word topic, sentence-wise (each sentence is considered a separate document).
-    -- Passing the True flag to infer enables returning the most common assignment, rather than the last.
-    -- FIXME: chain RNGs together instead of using global here. also keep in mind, getStdRandom can be a barrier when parallelizing
-    infer :: IO [Int]
-    infer = concatMap elems . LDA.tassign <$> getStdRandom (
-        LDA.infer num_iter True model [map snd ws | ws <- sentenceWords])
     -- wordTopics is the final assignment of a topic to each word in sequence.
     -- This does not include the removed stop words.
     wordTopics0 :: [Int]
-    wordTopics0 = unsafePerformIO infer
+    wordTopics0 = infer (num_iter,model,map (map snd) sentenceWords)
     -- Insert the missing stop words, assigning the topic (-1) to them.
     stopTopic = (-1)
     wordTopics = V.replicate (fromIntegral (totalWordMass text)) stopTopic V.// [(index,topic) | ((index,_),topic) <- zip words wordTopics0]
@@ -126,13 +127,9 @@ topicTiling w model text = let
            else 0
     valleyDepths = V.filter (>0) gapDepths
     -- Assign boundaries at any valley deeper than a cutoff threshold.
-    -- here, one stdev deeper than the mean
-    threshold = mean valleyDepths + stddev valleyDepths
+    threshold = mean valleyDepths + threshold_multiplier * stddev valleyDepths
     boundaries = catMaybes $ zipWith assign [0..] (V.toList gapDepths)
-        where assign i score =
-                  if score > threshold
-                     then Just (gapIndex i)
-                     else Nothing
+        where assign i score = if score > threshold then Just (gapIndex i) else Nothing
     SentenceMass total = totalSentenceMass text
     masses = map SentenceMass $ indicesToMasses boundaries total
     showDebugInfo = unsafePerformIO $ do

@@ -10,6 +10,9 @@ import Data.Binary
 import System.Environment (getArgs)
 import qualified Data.Aeson as Aeson
 import Control.Applicative
+import Data.List
+import Control.Parallel.Strategies
+import Debug.Trace
 
 import NLP.Tokenizer
 import NLP.Segmentation
@@ -43,32 +46,45 @@ main = do
             fail $ printf "Model file does not exist: %s\n" lda_file
 
     let adapt f toks = fromLinearMass toks (f toks)
+    let texttiling x = (printf "TextTiling%+.2f" x, adapt (textTiling x))
+    let topictiling w x = (printf "TopicTiling_%d_%+.2f" w x, adapt (topicTiling w x lda))
     let methods = 
-            [ ("TextTiling", adapt textTiling)
-            , ("TopicTiling", adapt (topicTiling 8 lda))
-            , ("DP-Baseline", adapt DP.baseline)
-            , ("DP-LDA", adapt (DP.lda lda))
-            ] :: [(String, [Token] -> [SentenceMass])]
+            [topictiling w x | w <- [3..8], x <- [-0.5,-0.25..2.0]]
+            --map texttiling [-1.0,-0.75..2.0]
+            --[ ("TextTiling", adapt (textTiling 1))
+            --, ("DP-Baseline", adapt DP.baseline)
+            --, ("DP-LDA", adapt (DP.lda lda))
+            :: [(String, [Token] -> [SentenceMass])]
+    let show_seg s = show (map toInteger s)
+    let add_annotation algname (Annotated docname toks refs) hyp =
+            Annotated docname toks (NamedSegmentation algname hyp : refs)
+    -- NB: Reference granularity is set to SentenceMass here.
+    let reference d = map (\(NamedSegmentation _ s) -> toSentenceMass (document d) s) (segmentation d)
 
+    let all_refs = concatMap reference testSet
+    printf "Test set segment lengths: mean %f stdev %f\n"
+        (mean (concat all_refs) :: Double)
+        (stdev (concat all_refs) :: Double)
+    
     BSL.writeFile "out-annotations.json" $ Aeson.encode $ NLP.Data.toJsonRep $ testSet
     printf "Non-algorithmic segmentations written to out-annotations.json\n"
 
-    let prn = show . map toInteger
-    forM_ methods $ \(algname, segment) -> do
+    forM_ methods $ \(algname, segment_fn) -> do
         printf "------------- %s\n" algname
-        out <- forM testSet $ \(Annotated docname toks refsegs) -> do
-            let refs = map (\(NamedSegmentation _ s) -> toSentenceMass toks s) refsegs
-            printf "-- %s\n" docname
-            forM_ refs (printf "Reference:      %s\n" . prn)
-            let s = segment toks
-            printf "Segments      :\t%s\n"   (prn s)
-            printf "Mean Pk       :\t%.4f\n" (mean (map (pk s) refs) :: Double)
-            printf "Mean S        :\t%.4f\n" (mean (map (similarity s) refs) :: Double)
-            --printf "Agreement drop:\t%.4f\n" (agreementDrop [s] [refs])
-            return $ Annotated docname toks (NamedSegmentation algname s : refsegs)
-        let result_file = "out-"++algname++".json"
-        BSL.writeFile result_file $ Aeson.encode $ NLP.Data.toJsonRep $ out
-        printf "Output written to %s\n" result_file
+        let hyps = [ let s = segment_fn toks
+                     in printf "-- %s: %s" docname (show_seg s) `trace` s
+                   | Annotated docname toks _ <- testSet]
+                   -- NB: run segmentations in parallel
+                   `using` parBuffer 4 (evalTraversable rseq)
+        let json_file = "out-"++algname++".json"
+        BSL.writeFile json_file $ Aeson.encode $ NLP.Data.toJsonRep $
+            zipWith (add_annotation algname) testSet hyps
+        printf "JSON-encoded segments written to %s\n" json_file
+
+        printf "%s segment lengths: mean %f stdev %f\n"
+            algname
+            (mean (concat hyps) :: Double)
+            (stdev (concat hyps) :: Double)
 
 showDatasetInfo :: Integral a => [Annotated a] -> IO ()
 showDatasetInfo ds = do
