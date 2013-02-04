@@ -1,22 +1,14 @@
 HSFLAGS = -O2 -threaded -rtsopts -funbox-strict-fields -optc-O3 -optc-march=native -optc-msse4
+TARGETS = train modelstats docstats algstats
+HS_FILES = $(wildcard **.hs)
 
-all: train modelstats docstats algstats
+all: $(TARGETS)
 
-.PHONY: train modelstats docstats algstats
-train:
-	ghc --make $(HSFLAGS) train
-
-modelstats:
-	ghc --make $(HSFLAGS) modelstats
-
-docstats:
-	ghc --make $(HSFLAGS) docstats
-
-algstats:
-	ghc --make $(HSFLAGS) algstats
+%:: %.hs $(filter-out $(addsuffix .hs,$(TARGETS)),$(HS_FILES))
+	ghc --make $(HSFLAGS) $<
 
 clean:
-	rm -f train modelstats docstats algstats
+	rm -f $(TARGETS)
 	find . -name \*.hi -delete
 	find . -name \*.o -delete
 
