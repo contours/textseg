@@ -1,34 +1,16 @@
-{-# LANGUAGE LambdaCase #-}
-import qualified Data.ByteString.Char8 as BS 
-import qualified Data.ByteString.Lazy as BSL
---import           Data.ByteString.Char8 (ByteString)
 import Control.Monad
 import Text.Printf
-import Python.Interpreter (py_initialize)
-import System.Directory (doesFileExist)
-import Data.Binary
-import System.Environment (getArgs)
-import qualified Data.Aeson as Aeson
-import Control.Applicative
-import Data.List
 import Control.Parallel.Strategies
-import Debug.Trace
 import qualified Data.IntMap as IntMap
 import Data.IntMap ((!))
 
-import NLP.Tokenizer
 import NLP.Segmentation
 import qualified NLP.Segmentation.TextTiling as TT
-import NLP.SegEval
-import qualified NLP.Data
-import           NLP.Data (Annotated(..),NamedSegmentation(..))
-import Util
+import           NLP.Data (Annotated(..))
 
 import Datasets (load_ds)
 
 main = do
-    py_initialize
-    args <- getArgs
     testSet <- load_ds
 
     let configs =
