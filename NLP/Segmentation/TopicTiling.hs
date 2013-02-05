@@ -40,7 +40,6 @@ import qualified NLP.GibbsLDA as GibbsLDA
 import Util (window)
 
 import qualified NLP.Stemmer
-import NLP.Data (stopWords)
 
 import Debug.Trace
 
@@ -56,8 +55,8 @@ trainLDA documents =
         a = 50.0 / fromIntegral num_topics
         b = 0.01
         num_iter = 500
-        words doc = [stem w | Word (BS.map toLower->w) <- doc
-                            , not (Set.member w stopWords)]
+        words doc = [stem w | Word (BS.map toLower->w) <- doc]
+                            -- , not (Set.member w stopWords)]
     --in unsafePerformIO $ getStdRandom $ LDA.estimate a b num_topics num_iter (map words documents)
     in unsafePerformIO $ GibbsLDA.estimate a b num_topics num_iter (map words documents)
 
@@ -75,10 +74,10 @@ topicTiling :: Int -> Double -> LDA.Model -> [Token] -> [SentenceMass]
 topicTiling w threshold_multiplier model text = let
     num_iter = 100
     wordMap = LDA.wordmap model
-    -- Lowercase and remove stop words and unknown words.
+    -- Lowercase and remove unknown words.
     -- Keep the original word-index of each word.
     wordsOf s = [(i, stem w) | (i, Word (BS.map toLower->w)) <- zip [0..] (filter isWord s)
-                             , not (Set.member w stopWords)
+                             -- , not (Set.member w stopWords)
                              , Map.member w wordMap]
     sentenceWords = map wordsOf (splitAtSentences text)
     words = wordsOf text

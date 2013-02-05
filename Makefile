@@ -1,6 +1,6 @@
-HSFLAGS = -O2 -threaded -rtsopts -funbox-strict-fields -optc-O3 -optc-march=native -optc-msse4
-TARGETS = train modelstats docstats algstats
-HS_FILES = $(wildcard **.hs)
+HSFLAGS = -O2 -fllvm -threaded -rtsopts -funbox-strict-fields
+TARGETS = train modelstats docstats algstats texttiling-experiment
+HS_FILES := $(patsubst ./%,%,$(shell find . -name \*.hs))
 
 all: $(TARGETS)
 

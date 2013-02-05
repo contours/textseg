@@ -17,6 +17,7 @@ module NLP.Segmentation
     , roundMasses
     , indicesToMasses
     , massesToIndices
+    , roundIndices
     -- "low-level interface"
     , downcastSegmentation
     , upcastSegmentation

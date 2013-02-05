@@ -154,15 +154,12 @@ choi path = do
     return (zipWith3 Annotated names (map doc txts) (zipWith seg [1..] txts))
 
 stopWords :: HashSet BS.ByteString
-stopWords = Set.empty
-{-
 stopWords = Set.unions
     -- Choi's stopwords list.
     [ Set.fromList $ BS.lines $ unsafePerformIO $ BS.readFile "data/choi_stopwords.list"
     -- Some additional suffixes.
     , Set.fromList ["'d","'re","'ve","'ll"]
     ]
-    -}
 
 data JsonRep t = JsonRep {
     -- TODO: add the type. assumed linear.

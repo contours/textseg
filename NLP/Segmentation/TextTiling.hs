@@ -22,6 +22,7 @@ import qualified Data.HashSet as Set
 import           Data.HashSet (HashSet)
 import Debug.Trace
 import Text.Printf
+import Text.Show.Functions ()
 
 import Util (mean,stdev,window)
 import NLP.Tokenizer
@@ -34,23 +35,31 @@ data Config = Config
     { w :: Int {-^ Length of pseudosentences. -}
     , k :: Int {-^ Number of pseudosentences on each side of the gap. -}
     , threshold_multiplier :: Double {-^ The threshold is the mean valley depth plus this many standard deviations. -}
-    , smoothing_radius :: Int {-^ Radius of the gap score smoothing filter. -} }
+    , smoothing_rounds :: Int {-^ How many times to apply the smoothing filter. -}
+    , smoothing_radius :: Int {-^ Size of the gap score smoothing filter. -}
+    , isStopWord :: ByteString -> Bool
+    } deriving (Show)
 
 data Result = Result
-    { masses :: [WordMass] }
+    { masses :: [WordMass]
+    , gapScores :: [Double]
+    -- | 0-based word index of where each gap occurs.
+    , gapIndices :: [Int] }
 
 -- TODO: drop hmatrix interface, use Data.Vector directly.
 
 -- TODO: add other configuration items:
---  * stop words list
 --  * stemming enabled
 --  * use top-N valleys, or use threshold: high or low
 
 defaultConfig = Config
     { w = 20
     , k = 10
-    , threshold_multiplier = 1.0
-    , smoothing_radius = 1 }
+    , threshold_multiplier = -0.5
+    , smoothing_rounds = 1
+    , smoothing_radius = 1
+    , isStopWord = \w -> Set.member w stopWords
+    }
 
 -- TODO: allow desired number of segments to be given.
 eval :: Config -> [Token] -> Result
@@ -59,7 +68,7 @@ eval config text = let
     -- the original word-index of each word.
     words :: [(Int, ByteString)]
     words = [(i,stem w) | (i, Word (BS.map toLower->w)) <- zip [0..] (filter isWord text)
-                        , not (Set.member w stopWords)]
+                        , not (isStopWord config w)]
         where stem = BS.pack . NLP.Stemmer.stem English . BS.unpack
     totalWordMass = length (filter isWord text)
     -- Group words into pseudo-sentences of length w
@@ -80,8 +89,9 @@ eval config text = let
     -- First smooth the score function so we don't get confused by
     -- small valleys. This is done with a mean filter of small arbitrary size.
     numGaps = dim gapCohesionScores
-    smoothed = subVector (2*smoothing_radius config) numGaps (conv meanKernel gapCohesionScores)
-        where meanKernel = constant (1.0/fromIntegral(1+2*smoothing_radius config)) (1+2*smoothing_radius config)
+    smoothing_width = 2*smoothing_radius config
+    smoothed = iterate (subVector smoothing_width numGaps . conv meanKernel) gapCohesionScores !! smoothing_rounds config
+        where meanKernel = constant (1.0/fromIntegral(1+smoothing_width)) (1+smoothing_width)
     -- As for identifying valleys, the TextTiling paper describes this rather ad-hoc algorithm.
     lpeak i = findPeak (-1) (smoothed@>i) i
     rpeak i = findPeak ( 1) (smoothed@>i) i
@@ -116,10 +126,10 @@ eval config text = let
                   0 -> [WordMass totalWordMass]
                   -- convert boundary indices to a list of word masses
                   _ -> map WordMass $ zipWith (-) (boundaries++[totalWordMass]) (0:boundaries++[totalWordMass])
-    in
-    Result {
-        masses = masses
-        }
+    in Result
+        { masses = masses
+        , gapScores = toList smoothed
+        , gapIndices = gapIndices }
     {-
     if length psentences < 2
        -- Text is too short. Return one segment.
