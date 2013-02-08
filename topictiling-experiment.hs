@@ -17,11 +17,8 @@ main = do
         fail "Usage: topictiling-experiment <path to LDA model>"
     lda <- let lda_file = head args
            in doesFileExist lda_file >>= \case
-               True -> do
-                   printf "Loading trained LDA model from %s\n" lda_file
-                   decodeFile lda_file
-               False -> do
-                   fail $ printf "Model file does not exist: %s\n" lda_file
+               True -> decodeFile lda_file
+               False -> fail $ "Model file does not exist: "++lda_file
     testSet <- load_ds
 
     let configs =

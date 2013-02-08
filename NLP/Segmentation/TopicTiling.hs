@@ -59,15 +59,18 @@ defaultTrainConfig = TrainConfig
 
 data Config = Config
     { model :: LDA.Model
+    , rng :: StdGen
     , infer_iterations :: Int
     -- | @w@ is a sentence windowing parameter, and should be set based on the expected length of segments. Depends on the data set, strongly affects results.
     , w :: Int
     -- | @threshold_multiplier@ is how many standard deviations to add to the mean valley depth when computing the gap threshold. Recommended values are (-1) or (+1).
     , threshold_multiplier :: Double }
 
+-- | Note that this configuration provides a compile-time-constant random number generator.
 defaultConfig :: LDA.Model -> Config
 defaultConfig model = Config
     { model = model
+    , rng = mkStdGen 42
     , infer_iterations = 100
     , w = 3
     , threshold_multiplier = -1.0 }
@@ -93,10 +96,9 @@ train config documents = unsafePerformIO $ GibbsLDA.estimate
 infer :: Config -> [[ByteString]] -> [Int]
 -- Infer word topic, sentence-wise (each sentence is considered a separate document).
 -- Passing the True flag to infer enables returning the most common assignment, rather than the last.
--- FIXME: chain RNGs together instead of using global here. also keep in mind, getStdRandom is a mutex when parallelizing
-infer config sentenceWords = unsafePerformIO $ do
-    model' <- getStdRandom (LDA.infer (infer_iterations config) True (model config) sentenceWords)
-    return $ concatMap elems $ LDA.tassign model'
+infer config sentenceWords = let
+    (model',rng') = LDA.infer (infer_iterations config) True (model config) sentenceWords (rng config)
+    in concatMap elems $ LDA.tassign model'
 
 eval :: Config -> [Token] -> Result
 eval config text = let
