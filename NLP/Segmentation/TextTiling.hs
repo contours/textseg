@@ -11,12 +11,12 @@ module NLP.Segmentation.TextTiling
 
 import qualified Data.ByteString.Char8 as BS
 import           Data.ByteString.Char8 (ByteString)
-import Data.Packed
-import Numeric.Container
-import Numeric.LinearAlgebra.Util
+import Numeric.LinearAlgebra.Util (conv)
+import Data.Vector.Unboxed (Vector)
+import qualified Data.Vector.Generic as V
+import           Data.Vector.Generic ((!))
 import Data.Maybe
 import Data.Char
---import Data.List
 import qualified Data.HashSet as Set
 import Text.Show.Functions ()
 
@@ -42,8 +42,6 @@ data Result = Result
     , gapScores :: [Double]
     -- | 0-based word index of where each pseudosentence gap occurs.
     , gapIndices :: [Int] }
-
--- TODO: drop hmatrix interface, use Data.Vector directly.
 
 -- TODO: add other configuration items:
 --  * stemming enabled
@@ -77,7 +75,7 @@ eval config text = let
     psentences = map merge (window (w config) (w config) words)
     -- Compute lexical cohesion score across each gap between pseudo-sentences.
     -- Use a block of k=10 pseudo-sentences on each side of the gap.
-    (gapIndices, fromList -> gapCohesionScores) = unzip $
+    (gapIndices, V.fromList -> gapCohesionScores) = unzip $
         map (uncurry score . splitAt (k config)) (window (2*k config) 1 psentences)
     dict = mkDictionary (map snd words)
     score (merge'->(_,lws)) (merge'->(i,rws)) =
@@ -85,36 +83,36 @@ eval config text = let
     -- Compute a depth score for each gap; this is the distance from the peaks on both sides of a valley, to the valley.
     -- First smooth the score function so we don't get confused by
     -- small valleys. This is done with a mean filter of small arbitrary size.
-    numGaps = dim gapCohesionScores
+    numGaps = V.length gapCohesionScores
     smoothing_width = 2*smoothing_radius config
-    smoothed = iterate (subVector smoothing_width numGaps . conv meanKernel) gapCohesionScores !! smoothing_rounds config
-        where meanKernel = constant (1.0/fromIntegral(1+smoothing_width)) (1+smoothing_width)
+    smoothed = iterate (V.slice smoothing_width numGaps . conv meanKernel) gapCohesionScores !! smoothing_rounds config
+        where meanKernel = V.replicate (1+smoothing_width) (1.0/fromIntegral(1+smoothing_width))
     -- As for identifying valleys, the TextTiling paper describes this rather ad-hoc algorithm.
-    lpeak i = findPeak (-1) (smoothed@>i) i
-    rpeak i = findPeak ( 1) (smoothed@>i) i
-    findPeak dir x i | i == 0 && dir == -1 = max x (smoothed@>i)
-    findPeak dir x i | i == numGaps-1 && dir == 1 = max x (smoothed@>i)
-    findPeak dir x i = if smoothed@>i >= x
-                          then findPeak dir (smoothed@>i) (i+dir)
+    lpeak i = findPeak (-1) (smoothed!i) i
+    rpeak i = findPeak ( 1) (smoothed!i) i
+    findPeak dir x i | i == 0 && dir == -1 = max x (smoothed!i)
+    findPeak dir x i | i == numGaps-1 && dir == 1 = max x (smoothed!i)
+    findPeak dir x i = if smoothed!i >= x
+                          then findPeak dir (smoothed!i) (i+dir)
                           else x
     isLocalMinimum i | i == 0 = False
     isLocalMinimum i | i == numGaps-1 = False
-    isLocalMinimum i = case (compare (smoothed@>(i-1)) (smoothed@>i), compare (smoothed@>i) (smoothed@>(i+1))) of
+    isLocalMinimum i = case (compare (smoothed!(i-1)) (smoothed!i), compare (smoothed!i) (smoothed!(i+1))) of
                             (GT,LT) -> True
                             (EQ,LT) -> True
                             (GT,EQ) -> True
                             _ -> False
-    gapDepths = buildVector numGaps $ \i ->
+    gapDepths = (V.generate numGaps $ \i ->
         if isLocalMinimum i
-           then lpeak i + rpeak i - 2*(smoothed@>i)
-           else 0
-    numValleys = length (filter (>0) (toList gapDepths))
-    valleyDepths = filter (>0) (toList gapDepths)
+           then lpeak i + rpeak i - 2*(smoothed!i)
+           else 0) :: Vector Double
+    numValleys = length (filter (>0) (V.toList gapDepths))
+    valleyDepths = filter (>0) (V.toList gapDepths)
     -- Assign boundaries at any valley deeper than a cutoff threshold.
     threshold = if length valleyDepths == 0
                    then 0
                    else mean valleyDepths + threshold_multiplier config * stdev valleyDepths
-    boundaries1 = catMaybes $ zipWith assign gapIndices (toList gapDepths)
+    boundaries1 = catMaybes $ zipWith assign gapIndices (V.toList gapDepths)
         where assign i score = if score > threshold then Just i else Nothing
     -- Remove boundaries too near each other.
     -- This heuristic is not described in the original paper, but is present in the NLTK implementation.
@@ -125,7 +123,7 @@ eval config text = let
                   _ -> map WordMass $ zipWith (-) (boundaries++[totalWordMass]) (0:boundaries++[totalWordMass])
     in Result
         { masses = masses
-        , gapScores = toList smoothed
+        , gapScores = V.toList smoothed
         , gapIndices = gapIndices }
     {-
     if length psentences < 2

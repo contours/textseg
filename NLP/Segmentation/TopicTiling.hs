@@ -15,20 +15,20 @@ module NLP.Segmentation.TopicTiling
     , LDA.Model
     ) where
 
-import qualified Data.Vector.Generic as V
-import Data.Vector.Generic ((!))
-import Data.List
-import Numeric.GSL.Statistics (mean,stddev)
-import Data.Vector.Unboxed (Vector)
-import qualified Data.Vector.Storable as Storable
-import Data.Char (toLower)
-import           Data.ByteString.Char8 (ByteString)
-import qualified Data.ByteString.Char8 as BS
-import System.IO.Unsafe (unsafePerformIO)
-import qualified Data.Map as Map
-import Data.Maybe (catMaybes)
-import System.Random
 import Data.Array.IArray (elems)
+import Data.Char (toLower)
+import Data.List
+import Data.Maybe (catMaybes)
+import Data.Vector.Generic ((!))
+import Data.Vector.Unboxed (Vector)
+import Numeric.GSL.Statistics (mean,stddev)
+import qualified Data.ByteString.Char8 as BS
+import           Data.ByteString.Char8 (ByteString)
+import qualified Data.Map as Map
+import qualified Data.Vector.Generic as V
+import qualified Data.Vector.Storable as Storable
+import System.IO.Unsafe (unsafePerformIO)
+import System.Random
 
 import NLP.Segmentation
 import NLP.Tokenizer
@@ -37,7 +37,6 @@ import qualified NLP.LDA as LDA
 import qualified NLP.GibbsLDA as GibbsLDA
 import Util (window)
 
--- TODO: drop hmatrix interface, use Data.Vector directly.
 -- TODO: add other configuration items:
 --  * stemming/stopwords
 --  * use top-N valleys, or use threshold
