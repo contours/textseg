@@ -1,12 +1,12 @@
 import Data.Binary
 
-import NLP.Segmentation.TopicTiling
+import qualified NLP.Segmentation.TopicTiling as TT
 
 import Datasets (load_training_set)
 
 main = do
     docs <- load_training_set
-    let lda = trainLDA docs
+    let lda = TT.train TT.defaultTrainConfig docs
     encodeFile "/srv/data/hybrid.model" lda
 
 

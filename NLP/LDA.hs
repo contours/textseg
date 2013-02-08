@@ -9,15 +9,17 @@ module NLP.LDA
 
 import Control.Applicative
 import Control.Monad
-import Control.Monad.ST.Strict
+import Control.Monad.ST.Strict hiding (unsafeIOToST)
+import Control.Monad.ST.Unsafe (unsafeIOToST)
 import Data.Array.IArray
-import Data.Array.ST
 import Data.Array.Unboxed
+import Data.Array.ST hiding (unsafeFreeze)
+import Data.Array.Unsafe (unsafeFreeze)
 import Data.Binary hiding (Word)
 import Data.List
 import Data.Maybe
 import Data.STRef
-import qualified Data.ByteString.Char8 as BS
+-- import qualified Data.ByteString.Char8 as BS
 import           Data.ByteString.Char8 (ByteString)
 import qualified Data.Map as Map
 import           Data.Map (Map)
@@ -253,7 +255,7 @@ infer num_iterations mode_method model documents rng0 = runST $ do
             modifyArray ndsum m (+1)
             return topic
 
-    forM_ [1..num_iterations] $ \iter -> do
+    forM_ [1..num_iterations] $ \_ -> do
         forM_ [1..num_documents] $ \m -> do
             forM_ [1..doc_length m] $ \n -> do
                 topic <- sampling m n
@@ -343,6 +345,7 @@ multinomialSample ps rng = let (u,rng') = randomR (0, sum ps) rng
 findIndexCumulative f (x:xs) = go 0 x xs
     where go i a (b:bs) = if f a then Just i else go (i+1) (a+b) bs
           go i a [] = if f a then Just i else Nothing
+findIndexCumulative _ [] = error "findIndexCumulative: not found"
 
 {-# INLINE withRng #-}
 withRng :: STRef s a -> (a -> (b, a)) -> ST s b

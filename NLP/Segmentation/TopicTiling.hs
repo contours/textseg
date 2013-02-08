@@ -1,34 +1,32 @@
+{- |
+Names in this module are intended to be imported qualified.
+-}
 {-# LANGUAGE ViewPatterns #-}
 {-# LANGUAGE MultiWayIf #-}
-{-# LANGUAGE StandaloneDeriving #-}
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE DeriveGeneric #-}
+-- {-# LANGUAGE FlexibleContexts #-}
 module NLP.Segmentation.TopicTiling
-    ( trainLDA
-    , topicTiling
+    ( train
+    , eval
+    , TrainConfig(..)
+    , defaultTrainConfig
+    , Config(..)
+    , defaultConfig
+    , Result(..)
     , LDA.Model
     ) where
 
 import qualified Data.Vector.Generic as V
 import Data.Vector.Generic ((!))
-import qualified Data.HashMap.Strict as M
-import           Data.HashMap.Strict (HashMap)
 import Data.List
 import Numeric.GSL.Statistics (mean,stddev)
 import Data.Vector.Unboxed (Vector)
 import qualified Data.Vector.Storable as Storable
-import Control.Monad
-import Data.Char (toLower, isAlpha)
+import Data.Char (toLower)
 import           Data.ByteString.Char8 (ByteString)
 import qualified Data.ByteString.Char8 as BS
 import System.IO.Unsafe (unsafePerformIO)
-import Control.Applicative
-import qualified Data.HashSet as Set
-import           Data.HashSet (HashSet)
 import qualified Data.Map as Map
 import Data.Maybe (catMaybes)
-import Text.Printf
-import Data.Binary
 import System.Random
 import Data.Array.IArray (elems)
 
@@ -39,55 +37,81 @@ import qualified NLP.LDA as LDA
 import qualified NLP.GibbsLDA as GibbsLDA
 import Util (window)
 
-import qualified NLP.Stemmer
+-- TODO: drop hmatrix interface, use Data.Vector directly.
+-- TODO: add other configuration items:
+--  * stemming/stopwords
+--  * use top-N valleys, or use threshold
+--  * random generator (pass through to NLP.LDA)
 
-import Debug.Trace
+data TrainConfig = TrainConfig
+    { train_iterations :: Int
+    , num_topics :: Int
+    , alpha :: Double
+    , beta :: Double }
+    deriving Show
 
---stem = BS.pack . NLP.Stemmer.stem NLP.Stemmer.English . BS.unpack
--- stemming disabled
-stem = id
+defaultTrainConfig :: TrainConfig
+defaultTrainConfig = TrainConfig
+    { train_iterations = 500
+    , num_topics = 100
+    , alpha = 50.0 / fromIntegral (num_topics defaultTrainConfig)
+    , beta = 0.01 }
+
+data Config = Config
+    { model :: LDA.Model
+    , infer_iterations :: Int
+    -- | @w@ is a sentence windowing parameter, and should be set based on the expected length of segments. Depends on the data set, strongly affects results.
+    , w :: Int
+    -- | @threshold_multiplier@ is how many standard deviations to add to the mean valley depth when computing the gap threshold. Recommended values are (-1) or (+1).
+    , threshold_multiplier :: Double }
+
+defaultConfig :: LDA.Model -> Config
+defaultConfig model = Config
+    { model = model
+    , infer_iterations = 100
+    , w = 3
+    , threshold_multiplier = -1.0 }
+
+data Result = Result
+    { masses :: [SentenceMass]
+    -- | Assignment of a topic to each Word token.
+    -- Unknown words have an arbitrary negative topic id.
+    , wordTopics :: [Int]
+    -- | Topic coherence score over sentence gaps.
+    , gapScores :: [Double]
+    }
 
 -- | Train the LDA classifier on a set of documents.
-trainLDA :: [[Token]] -> LDA.Model
-trainLDA documents =
-    -- suggested parameters as in Riedl 2012
-    let num_topics = 100
-        a = 50.0 / fromIntegral num_topics
-        b = 0.01
-        num_iter = 500
-        words doc = [stem w | Word (BS.map toLower->w) <- doc]
-                            -- , not (Set.member w stopWords)]
-    --in unsafePerformIO $ getStdRandom $ LDA.estimate a b num_topics num_iter (map words documents)
-    in unsafePerformIO $ GibbsLDA.estimate a b num_topics num_iter (map words documents)
+train :: TrainConfig -> [[Token]] -> LDA.Model
+train config documents = unsafePerformIO $ GibbsLDA.estimate
+    (alpha config)
+    (beta config)
+    (num_topics config)
+    (train_iterations config)
+    [[w | Word (BS.map toLower->w) <- doc] | doc <- documents]
 
-infer :: (Int, LDA.Model, [[ByteString]]) -> [Int]
+infer :: Config -> [[ByteString]] -> [Int]
 -- Infer word topic, sentence-wise (each sentence is considered a separate document).
 -- Passing the True flag to infer enables returning the most common assignment, rather than the last.
--- FIXME: chain RNGs together instead of using global here. also keep in mind, getStdRandom can be a barrier when parallelizing
-infer (num_iter,model,sentenceWords) = unsafePerformIO $ concatMap elems . LDA.tassign <$> getStdRandom (LDA.infer num_iter True model sentenceWords)
+-- FIXME: chain RNGs together instead of using global here. also keep in mind, getStdRandom is a mutex when parallelizing
+infer config sentenceWords = unsafePerformIO $ do
+    model' <- getStdRandom (LDA.infer (infer_iterations config) True (model config) sentenceWords)
+    return $ concatMap elems $ LDA.tassign model'
 
--- | @topicTiling w threshold_multiplier model text@.
--- @w@ is a sentence windowing parameter, and should be set based on the expected length of segments. Depends on the data set, strongly affects results.
--- @threshold_multiplier@ is how many standard deviations to add to the mean valley depth when computing the gap threshold. Recommended values are (-1) or (+1).
--- TODO: allow desired number of segments to be given.
-topicTiling :: Int -> Double -> LDA.Model -> [Token] -> [SentenceMass]
-topicTiling w threshold_multiplier model text = let
-    num_iter = 100
-    wordMap = LDA.wordmap model
-    -- Lowercase and remove unknown words.
+eval :: Config -> [Token] -> Result
+eval config text = let
+    wordMap = LDA.wordmap (model config)
+    -- Lowercase all words, and drop unknown words.
     -- Keep the original word-index of each word.
-    wordsOf s = [(i, stem w) | (i, Word (BS.map toLower->w)) <- zip [0..] (filter isWord s)
-                             -- , not (Set.member w stopWords)
-                             , Map.member w wordMap]
+    wordsOf s = [(i, w) | (i, Word (BS.map toLower->w)) <- zip [0..] (filter isWord s), Map.member w wordMap]
     sentenceWords = map wordsOf (splitAtSentences text)
-    words = wordsOf text
     -- wordTopics is the final assignment of a topic to each word in sequence.
-    -- This does not include the removed stop words.
+    -- This does not include the removed stop/unknown words.
     wordTopics0 :: [Int]
-    wordTopics0 = infer (num_iter,model,map (map snd) sentenceWords)
-    -- Insert the missing stop words, assigning the topic (-1) to them.
+    wordTopics0 = infer config (map (map snd) sentenceWords)
+    -- Insert the missing stop/unknown words, assigning the topic (-1) to them.
     stopTopic = (-1)
-    wordTopics = V.replicate (fromIntegral (totalWordMass text)) stopTopic V.// [(index,topic) | ((index,_),topic) <- zip words wordTopics0]
+    wordTopics = V.replicate (fromIntegral (totalWordMass text)) stopTopic V.// [(index,topic) | ((index,_),topic) <- zip (wordsOf text) wordTopics0]
     sentences :: [Vector Int]
     sentences = takesV (sentenceWordMass text) wordTopics
     -- Represent each sentence as a topic frequency vector and compute a distance metric over sentence gaps.
@@ -97,9 +121,9 @@ topicTiling w threshold_multiplier model text = let
     freq x = frequencyVector' topicDict x V.// [(topicDict Map.! stopTopic, 0)]
     metric a b = cosineSimilarity (freq a) (freq b)
     gapScores :: Vector Double
-    gapScores = V.fromList [metric (V.concat l) (V.concat r) | (l,r) <- map (splitAt w) (window (2*w) 1 sentences)]
+    gapScores = V.fromList [metric (V.concat l) (V.concat r) | (l,r) <- map (splitAt (w config)) (window (2*w config) 1 sentences)]
     -- real sentence index of the i'th gap (gap is on the left of the specified sentence)
-    gapIndex i = i+w
+    gapIndex i = i + w config
 
     -- TODO: unify the following process between TopicTiling and TextTiling.
 
@@ -126,18 +150,21 @@ topicTiling w threshold_multiplier model text = let
            else 0
     valleyDepths = V.filter (>0) gapDepths
     -- Assign boundaries at any valley deeper than a cutoff threshold.
-    threshold = mean valleyDepths + threshold_multiplier * stddev valleyDepths
+    threshold = mean valleyDepths + threshold_multiplier config * stddev valleyDepths
     boundaries = catMaybes $ zipWith assign [0..] (V.toList gapDepths)
         where assign i score = if score > threshold then Just (gapIndex i) else Nothing
     SentenceMass total = totalSentenceMass text
     masses = map SentenceMass $ indicesToMasses boundaries total
-    showDebugInfo = unsafePerformIO $ do
-        printf "# TopicTiling {'threshold': %.4f, 'score': %s, 'w': %d, 'predicted': %s}\n" threshold (show (V.toList gapScores)) w (show (map toInteger masses))
-        return ()
-    in
-    --showDebugInfo `seq`
-    masses
+    in Result
+        { masses = masses
+        , wordTopics = V.toList wordTopics
+        , gapScores = V.toList gapScores }
 
+takesV :: (Integral i, V.Vector v a) => [i] -> v a -> [v a]
+takesV is xs = snd $ mapAccumL (\a b -> swap (V.splitAt (fromIntegral b) a)) xs is
+    where swap (a,b) = (b,a)
+
+{-
 -- | Jensen–Shannon divergence, a smoothed and symmetric version of 'klDivergence'.
 jsDivergence :: (Eq a, Floating a, V.Vector v a) => v a -> v a -> a
 jsDivergence p q = 0.5*klDivergence p m + 0.5*klDivergence q m
@@ -149,24 +176,5 @@ klDivergence p q = V.sum $ V.zipWith f p q
     where f a b | a == 0 = 0
                 | b == 0 = error "klDivergence p q: undefined where q has zeroes and p doesn't"
                 | otherwise = a * log (a/b)
-
-vsum :: [Vector Int] -> Vector Int
-vsum = foldl1' (V.zipWith (+))
-
-vnormalize v = V.map (/n) v
-    where n = sqrt (V.sum (V.zipWith (*) v v))
-
-scanM :: (Monad m) => (a -> b -> m a) -> a -> [b] -> m [a]
-scanM _ q [] = return [q]
-scanM f q (x:xs) =
-   do q2 <- f q x
-      qs <- scanM f q2 xs
-      return (q:qs)
-
-singleton :: Int -> Int -> Vector Int
-singleton l i = V.replicate l 0 V.// [(i,1)]
-
-takesV :: (Integral i, V.Vector v a) => [i] -> v a -> [v a]
-takesV is xs = snd $ mapAccumL (\a b -> swap (V.splitAt (fromIntegral b) a)) xs is
-    where swap (a,b) = (b,a)
+-}
 

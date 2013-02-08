@@ -17,7 +17,7 @@ import Debug.Trace
 import NLP.Tokenizer
 import NLP.Segmentation
 import qualified NLP.Segmentation.TextTiling as TextTiling
-import NLP.Segmentation.TopicTiling
+import qualified NLP.Segmentation.TopicTiling as TopicTiling
 import qualified NLP.Segmentation.DP as DP
 import NLP.SegEval
 import qualified NLP.Data
@@ -46,11 +46,12 @@ main = do
             fail $ printf "Model file does not exist: %s\n" lda_file
 
     let adapt f toks = fromLinearMass toks (f toks)
-    let texttiling x = (printf "TextTiling%+.2f" x, adapt $ TextTiling.masses . TextTiling.eval
-            TextTiling.defaultConfig { TextTiling.threshold_multiplier = x })
-    let topictiling w x = (printf "TopicTiling_%d_%+.2f" w x, adapt (topicTiling w x lda))
+    let texttiling x = (printf "TextTiling%+.2f" x, adapt $
+            TextTiling.masses . TextTiling.eval TextTiling.defaultConfig { TextTiling.threshold_multiplier = x })
+    let topictiling w x = (printf "TopicTiling_%d_%+.2f" w x, adapt $
+            TopicTiling.masses . TopicTiling.eval ((TopicTiling.defaultConfig lda) { TopicTiling.w = w }))
     let methods = 
-            [topictiling w x | w <- [3..8], x <- [-0.5,-0.25..2.0]]
+            [topictiling w x | w <- [3..8], x <- [-0.5,-0.25..2.0]::[Double]]
             --map texttiling [-1.0,-0.75..2.0]
             --[ ("TextTiling", adapt (textTiling 1))
             --, ("DP-Baseline", adapt DP.baseline)

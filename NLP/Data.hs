@@ -28,12 +28,10 @@ import qualified Data.ByteString.Char8 as BS
 import           Data.ByteString.Char8 (ByteString)
 import Data.Attoparsec.ByteString.Char8
 import Control.Applicative
-import Data.List (transpose,group)
 import Text.Printf (printf)
 import qualified Data.HashSet as Set
 import           Data.HashSet (HashSet)
 import System.IO.Unsafe (unsafePerformIO)
-import Control.Exception (assert)
 import System.Path.Glob (glob)
 import System.FilePath (combine)
 import qualified Data.Map as Map
@@ -177,6 +175,7 @@ instance FromJSON t => FromJSON (JsonRep t) where
         JsonRep <$> forM (Map.toList hm) doc
         where doc (name, item) = JsonDoc <$> pure name <*> (mapM seg =<< return . Map.toList =<< parseJSON item)
               seg (coder, item) = NamedSegmentation <$> pure coder <*> parseJSON item
+    parseJSON _ = fail "FromJSON(NLP.Data.JsonRep): expected Object"
 
 instance Integral t => ToJSON (JsonRep t) where
     toJSON (JsonRep docs) = object

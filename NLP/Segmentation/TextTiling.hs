@@ -11,7 +11,6 @@ module NLP.Segmentation.TextTiling
 
 import qualified Data.ByteString.Char8 as BS
 import           Data.ByteString.Char8 (ByteString)
-import System.IO.Unsafe
 import Data.Packed
 import Numeric.Container
 import Numeric.LinearAlgebra.Util
@@ -19,9 +18,6 @@ import Data.Maybe
 import Data.Char
 --import Data.List
 import qualified Data.HashSet as Set
-import           Data.HashSet (HashSet)
-import Debug.Trace
-import Text.Printf
 import Text.Show.Functions ()
 
 import Util (mean,stdev,window)
@@ -42,8 +38,9 @@ data Config = Config
 
 data Result = Result
     { masses :: [WordMass]
+    -- | Coherence score across pseudosentence gaps.
     , gapScores :: [Double]
-    -- | 0-based word index of where each gap occurs.
+    -- | 0-based word index of where each pseudosentence gap occurs.
     , gapIndices :: [Int] }
 
 -- TODO: drop hmatrix interface, use Data.Vector directly.

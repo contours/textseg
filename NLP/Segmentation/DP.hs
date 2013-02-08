@@ -12,13 +12,11 @@ import           Data.ByteString.Char8 (ByteString)
 import qualified Data.ByteString.Char8 as BS
 import Data.Char (toLower)
 import qualified Data.HashSet as HashSet
-import qualified Data.Set as Set
 import System.IO.Unsafe (unsafePerformIO)
 import Control.Monad
 import Control.Monad.ST
 import Data.Array.ST
 import Data.STRef
-import Control.Applicative
 import System.Random
 import Control.Parallel.Strategies
 
@@ -27,8 +25,6 @@ import NLP.Segmentation
 import qualified NLP.Stemmer
 import NLP.Data (stopWords)
 import qualified NLP.LDA as LDA
-
-import Debug.Trace
 
 stem = BS.pack . NLP.Stemmer.stem NLP.Stemmer.English . map toLower . BS.unpack
 

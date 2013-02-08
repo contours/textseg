@@ -15,12 +15,10 @@ import Control.Exception
 import System.Directory
 import Control.Applicative
 import Data.Attoparsec.ByteString.Char8 hiding (take)
-import Data.Binary hiding (Word)
 import           Data.Map (Map)
 import qualified Data.Map as Map
 import Data.List
 import Data.Array.Unboxed
-import Control.Exception (assert)
 
 import NLP.LDA (Model(..))
 
@@ -98,8 +96,6 @@ parse_tassign str =
               return (w+1, t+1)
           word = decimal :: Parser Int
           topic = decimal :: Parser Int
-
-parse_phi = parse_array
 
 parse_array :: ByteString -> UArray (Int,Int) Double
 parse_array str = case parseOnly topics str of

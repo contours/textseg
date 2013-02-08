@@ -27,7 +27,6 @@ import qualified Data.Char (isPunctuation)
 import Control.Applicative
 import Data.List
 import Data.Hashable (Hashable(..))
-import Text.Printf (printf)
 
 data Token
     = Word !ByteString
@@ -98,12 +97,10 @@ breakPunctuation = concatMap f
                    (w1, []) -> [Punctuation (BS.pack w1)]
                    (w1, w2) -> Punctuation (BS.pack w1) : g w2
           f other = [other]
-          g w =
-              case break punct w of
-                   (w1, []) -> [Word (BS.pack w1)]
-                   ([], w2) -> error (printf "breakPunctuation.g: %s" w)
-                   (w1, w2) -> [Word (BS.pack w1), Punctuation (BS.pack w2)]
-
+          g w = case break punct w of
+                     (w1, []) -> [Word (BS.pack w1)]
+                     ([], _ ) -> error ("breakPunctuation.g: " ++ w)
+                     (w1, w2) -> [Word (BS.pack w1), Punctuation (BS.pack w2)]
           punct c = Data.Char.isPunctuation c || c == '`'
 
 -- For now, simply looks for isolated period characters, question marks, and exclamation marks.
