@@ -1,5 +1,5 @@
 HSFLAGS = -W -O2 -fllvm -threaded -rtsopts -funbox-strict-fields
-TARGETS = train modelstats docstats algstats texttiling-experiment topictiling-experiment
+TARGETS = train modelstats docstats algstats texttiling-experiment topictiling-experiment dp-experiment
 HS_FILES := $(patsubst ./%,%,$(shell find . -name \*.hs))
 
 all: $(TARGETS)
