@@ -13,7 +13,7 @@ import NLP.Tokenizer
 
 -- The Contours data set.
 load_ds_contours = do
-    ds_contours_rybesh <- NLP.Data.contours "/srv/data/u-series"
+    ds_contours_rybesh <- NLP.Data.contours "/mnt/work/textseg/data/u-series"
 
     -- NB: remove rybesh's segs, since they don't cover all documents in the set
     let ds_contours = map (\d -> d {
@@ -24,7 +24,7 @@ load_ds_contours = do
 -- The Contours data set plus the docsouth reference segmentations (only of those documents).
 load_ds_merged = do
     ds_contours <- load_ds_contours
-    ds_docsouth <- NLP.Data.contours "/srv/data/docsouth"
+    ds_docsouth <- NLP.Data.contours "/mnt/work/textseg/data/docsouth"
 
     -- add docsouth reference segmentations to all present contours documents
     let ds_merged = zipWith (\d1 d2 -> Annotated {
@@ -42,7 +42,7 @@ load_ds = do
     return $ filter (\(Annotated _ _ ss) -> length (segseg (fromJust (find ((=="annotators:docsouth").segname) ss))) > 1) ds
 
 load_training_set = do
-    filenames <- glob "/srv/data/U. The*/*/*"
+    filenames <- glob "/mnt/work/textseg/data/U. The*/*/*"
     texts <- mapM BS.readFile filenames
     return $ map (dropSpeakerNames . map newlineToSentenceBreak . tokenize) texts
     where
