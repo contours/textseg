@@ -1,4 +1,4 @@
-#!/usr/bin/env python2
+#!/usr/bin/env python
 ##
 ## Dump all interview text from "contours/segment"-format Redis database to plain text files
 ## in the current directory. One sentence per line.
