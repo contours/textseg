@@ -1,4 +1,5 @@
 {-# LANGUAGE LambdaCase #-}
+import GHC.Conc (numCapabilities)
 import qualified Data.ByteString.Lazy as BSL
 --import           Data.ByteString.Char8 (ByteString)
 import Control.Monad
@@ -19,6 +20,7 @@ import Util
 import Datasets (load_ds)
 
 main = do
+    putStrLn $ "number of cores: " ++ show numCapabilities
     testSet <- load_ds
 
     let configs =
@@ -70,7 +72,7 @@ main = do
                      in printf "-- %s: %s" docname (show_seg s) `trace` s
                    | Annotated docname toks _ <- testSet]
                    -- NB: run segmentations in parallel
-                   `using` parBuffer 4 (evalTraversable rseq)
+                   `using` parBuffer 32 (evalTraversable rseq)
         let json_file = "out-"++algname++".json"
         BSL.writeFile json_file $ Aeson.encode $ NLP.Data.toJsonRep $
             zipWith (add_annotation algname) testSet hyps
