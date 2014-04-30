@@ -28,11 +28,11 @@ main = do
                 , TextTiling.threshold_multiplier = m
                 , TextTiling.smoothing_rounds = n
                 , TextTiling.smoothing_radius = s }
-            | w <- [14,16..26]
+            | w <- [8,10,12]
             , k <- [6,8..14]
-            , m <- [-1.0,-0.75..1.0]
-            , n <- [1..4]
-            , s <- if n > 0 then [1..4] else []]
+            , m <- [-1.0,-0.75..0.0]
+            , n <- [1..2]
+            , s <- if n > 0 then [1..2] else []]
 
     let adapt f toks = fromLinearMass toks (f toks)
     let texttiling config = (
